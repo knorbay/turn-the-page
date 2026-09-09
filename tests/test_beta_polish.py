@@ -22,7 +22,14 @@ class BetaPolishTests(unittest.TestCase):
 
     def test_frozen_save_is_outside_bundle_and_explicit_override_wins(self):
         with patch.dict(os.environ,{},clear=True),patch("sys.frozen",True,create=True):
-            self.assertEqual(default_save_path(),Path.home()/"Library/Application Support/Turn the Page/paper_story_save.json")
+            platform_paths={
+                "darwin":Path.home()/"Library/Application Support/Turn the Page/paper_story_save.json",
+                "win32":Path.home()/"AppData/Roaming/Turn the Page/paper_story_save.json",
+                "linux":Path.home()/".local/share/Turn the Page/paper_story_save.json",
+            }
+            for platform,expected in platform_paths.items():
+                with self.subTest(platform=platform),patch("sys.platform",platform):
+                    self.assertEqual(default_save_path(),expected)
             with patch.dict(os.environ,{"PAPER_STORY_SAVE":"/tmp/ttp-test.json"}):
                 self.assertEqual(default_save_path(),Path("/tmp/ttp-test.json"))
 
