@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.DS_Store
+paper_story_save.json
+build/
+dist/
+release/
+work/
+*.spec
+.venv/
+DEVELOPMENT_AUDIT.md
+DIRECTION_REBUILD_AUDIT.md
+TASARIM_NOTLARI_TR.md

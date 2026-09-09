@@ -1,0 +1,101 @@
+name: Beta builds
+
+on:
+  push:
+    branches: [main]
+    tags: ['beta-*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: python -m pip install -r requirements-build.txt
+      - name: Run gameplay contracts
+        env:
+          SDL_VIDEODRIVER: dummy
+          SDL_AUDIODRIVER: dummy
+        run: python -m unittest discover -s tests -q
+
+  build:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: windows
+          - os: ubuntu-latest
+            artifact: linux
+          - os: macos-14
+            artifact: macos
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libpulse-dev
+      - if: runner.os == 'macOS'
+        run: brew install sdl3
+      - run: python -m pip install -r requirements-build.txt
+      - name: Build and inspect native package
+        run: python tools/build_release.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: turn-the-page-${{ matrix.artifact }}
+          path: release/*
+          if-no-files-found: error
+
+  github-release:
+    if: startsWith(github.ref, 'refs/tags/beta-')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: turn-the-page-*
+          path: release
+          merge-multiple: true
+      - name: Publish prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" release/* --prerelease --title "TURN THE PAGE $GITHUB_REF_NAME" --notes-file RELEASE_NOTES.md
+
+  itch-beta:
+    if: startsWith(github.ref, 'refs/tags/beta-') && vars.ITCH_TARGET != ''
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: turn-the-page-*
+          path: release
+          merge-multiple: true
+      - name: Install official itch butler
+        run: |
+          curl -L https://broth.itch.zone/butler/linux-amd64/LATEST/archive/default -o butler.zip
+          unzip -q butler.zip -d .butler
+          chmod +x .butler/butler
+      - name: Push beta channels
+        env:
+          BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
+          ITCH_TARGET: ${{ vars.ITCH_TARGET }}
+        run: |
+          .butler/butler push release/Turn-the-Page-Windows-*.zip "${ITCH_TARGET}:windows-beta" --userversion "$GITHUB_REF_NAME"
+          .butler/butler push release/Turn-the-Page-Linux-*.tar.gz "${ITCH_TARGET}:linux-beta" --userversion "$GITHUB_REF_NAME"
+          .butler/butler push release/Turn-the-Page-macOS-*.zip "${ITCH_TARGET}:macos-beta" --userversion "$GITHUB_REF_NAME"
