@@ -38,41 +38,30 @@ def brand_font(size):
 
 def brand_art(size):
     width,height=size
-    paper=(246,239,213);ink=(38,38,43);red=(153,48,45);rule=(176,207,217)
-    canvas=Image.new("RGB",size,paper)
+    paper=(246,239,213);ink=(38,38,43);red=(153,48,45)
+    # The cover is a real deterministic frame from the game: the signature
+    # Baby Face reversal with the actual player, Excalibur, arena, notes, and
+    # ruled-paper renderer. Branding should introduce the scene, not replace it.
+    scene=Image.open(ROOT/"store"/"screenshots"/"baby-face-signature.png").convert("RGB")
+    canvas=crop_fit(scene,size)
     draw=ImageDraw.Draw(canvas)
-    for y in range(54,height,54):
-        draw.line((0,y,width,y),fill=rule,width=2)
-    draw.line((round(width*.075),0,round(width*.075),height),fill=(202,117,112),width=3)
 
-    emblem=Image.open(ROOT/"packaging"/"brand-emblem.png").convert("RGBA")
-    box=emblem.getchannel("A").getbbox()
-    emblem=emblem.crop(box)
-    # Leave a clean gutter between the emblem's external pencil and the wordmark.
-    # The same proportions must remain readable in both the wide hero and the
-    # nearly-square itch cover.
-    mark=round(min(width*.46,height*.76))
-    emblem.thumbnail((mark,mark),Image.Resampling.LANCZOS)
-    canvas.paste(emblem,(round(width*.015),(height-emblem.height)//2),emblem)
-
-    left=round(width*.51)
-    small=brand_font(round(height*.095));large=brand_font(round(height*.20))
-    draw.text((left,round(height*.19)),"TURN THE",font=small,fill=ink,stroke_width=1)
-    draw.text((left-4,round(height*.28)),"PAGE",font=large,fill=ink,stroke_width=1)
-    line_y=round(height*.51)
-    draw.line((left,line_y,width-round(width*.04),line_y-10),fill=red,width=8)
-    draw.line((left+10,line_y+12,width-round(width*.10),line_y+4),fill=ink,width=3)
-    tagline=brand_font(round(height*.044))
-    draw.text((left,round(height*.57)),"THE ARTIST DRAWS.",font=tagline,fill=ink)
-    draw.text((left,round(height*.625)),"YOU FIGHT BACK.",font=tagline,fill=red)
-    stamp_font=brand_font(round(height*.045))
-    stamp=(left,round(height*.74),width-round(width*.05),round(height*.84))
-    draw.rounded_rectangle(stamp,radius=6,fill=paper,outline=red,width=3)
-    label="PUBLIC BETA 0.9"
-    bounds=draw.textbbox((0,0),label,font=stamp_font)
-    tx=stamp[0]+(stamp[2]-stamp[0]-(bounds[2]-bounds[0]))//2
-    ty=stamp[1]+(stamp[3]-stamp[1]-(bounds[3]-bounds[1]))//2-2
-    draw.text((tx,ty),label,font=stamp_font,fill=red)
+    left=round(width*.045);top=round(height*.045)
+    right=round(width*(.62 if width/height<1.5 else .54))
+    bottom=round(height*.235)
+    # Offset rectangles echo the game's hand-drawn panels and leave the boss
+    # silhouette fully visible.
+    draw.rectangle((left+3,top+4,right+3,bottom+4),fill=(42,40,40))
+    draw.rectangle((left,top,right,bottom),fill=paper,outline=ink,width=2)
+    title=brand_font(round(height*.080))
+    subtitle=brand_font(round(height*.034))
+    draw.text((left+round(width*.018),top+round(height*.018)),
+              "TURN THE PAGE",font=title,fill=ink)
+    line_y=top+round(height*.118)
+    draw.line((left+round(width*.018),line_y,right-round(width*.02),line_y-2),
+              fill=red,width=max(3,round(height*.008)))
+    draw.text((left+round(width*.02),top+round(height*.142)),
+              "something is still drawing",font=subtitle,fill=ink)
     return canvas
 
 
