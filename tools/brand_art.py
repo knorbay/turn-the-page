@@ -1,10 +1,8 @@
 """Store artwork built from TURN THE PAGE's real runtime drawings."""
 from __future__ import annotations
 
-import math
 import os
 from pathlib import Path
-import random
 import sys
 
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
@@ -17,8 +15,6 @@ sys.path.insert(0, str(ROOT))
 import pygame
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
-from advanced_enemies import BabyFaceGiant
-from player import Player
 from scripted_events import ArtistDirector, ArtistTool
 
 
@@ -50,30 +46,45 @@ def _trim(image: Image.Image, pad=5) -> Image.Image:
                        min(image.height, box[3] + pad)))
 
 
-def baby_sprite() -> Image.Image:
-    surface = pygame.Surface((360, 330), pygame.SRCALPHA)
-    boss = BabyFaceGiant(178, 318, 4307)
-    boss.state = "idle"
-    boss.dead = False
-    boss.empowered = True
-    boss.moustache_progress = 1
-    boss.facing = -1
-    boss.draw(surface, StillCamera(), None)
-    return _trim(_pil(surface))
-
-
 def hero_sprite() -> Image.Image:
-    surface = pygame.Surface((145, 130), pygame.SRCALPHA)
-    player = Player(52, 64)
-    player.facing = 1
-    player.on_ground = True
-    player.vx = 58
-    player.anim_time = .42
-    player.page_style = "astronaut"
-    player.current_weapon = "excalibur"
-    player.aim_angle = -.38
-    player.draw(surface, StillCamera())
-    return _trim(_pil(surface))
+    """Draw the protagonist's runtime silhouette as a crisp large mark."""
+    image = Image.new("RGBA", (900, 900), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    ink = INK + (255,)
+    light_ink = (63, 61, 63, 255)
+    red = RED + (255,)
+    paper = PAPER + (255,)
+
+    # Pencil Blade, using the same wood, graphite, eraser, and red binding
+    # language as the in-game weapon. It sits behind the gripping hand.
+    blade = [(470, 385), (823, 666), (789, 718), (436, 438)]
+    draw.polygon(blade, fill=(216, 185, 92, 255))
+    draw.line(blade + [blade[0]], fill=ink, width=22, joint="curve")
+    draw.line((490, 414, 798, 661), fill=(246, 219, 126, 255), width=13)
+    draw.polygon([(823, 666), (872, 748), (789, 718)], fill=ink)
+    draw.line([(823, 666), (872, 748), (789, 718)], fill=ink, width=11, joint="curve")
+    draw.polygon([(435, 357), (484, 397), (445, 449), (395, 409)],
+                 fill=(213, 151, 144, 255))
+    draw.line([(435, 357), (484, 397), (445, 449), (395, 409), (435, 357)],
+              fill=ink, width=17, joint="curve")
+    for shift in (0, 24, 48):
+        draw.line((408 + shift, 391 + shift, 449 + shift, 367 + shift),
+                  fill=red, width=11)
+
+    # The same circle-head, single face tick, and stick anatomy used in play.
+    draw.ellipse((225, 65, 435, 275), fill=paper, outline=ink, width=27)
+    draw.ellipse((230, 69, 432, 272), outline=light_ink, width=5)
+    draw.line((345, 170, 394, 170), fill=ink, width=13)
+    draw.line((330, 276, 343, 573), fill=ink, width=31)
+    draw.line((337, 557, 202, 807), fill=ink, width=31)
+    draw.line((337, 557, 493, 816), fill=ink, width=31)
+    draw.line((330, 321, 210, 462, 143, 402), fill=ink, width=24, joint="curve")
+    draw.line((332, 324, 421, 413, 454, 409), fill=ink, width=24, joint="curve")
+    draw.ellipse((430, 386, 475, 431), fill=paper, outline=ink, width=11)
+    # A few doubled strokes retain the handmade wobble at full resolution.
+    draw.line((346, 286, 352, 555), fill=light_ink, width=5)
+    draw.line((347, 567, 486, 807), fill=light_ink, width=5)
+    return _trim(image, 12)
 
 
 def artist_sprite() -> Image.Image:
@@ -97,44 +108,11 @@ def _font(size, condensed=False):
     return ImageFont.load_default()
 
 
-def _crop_fit(image: Image.Image, size, focus=(.5, .5)) -> Image.Image:
-    ratio = max(size[0] / image.width, size[1] / image.height)
-    resized = image.resize((round(image.width * ratio), round(image.height * ratio)),
-                           Image.Resampling.LANCZOS)
-    left = round((resized.width - size[0]) * focus[0])
-    top = round((resized.height - size[1]) * focus[1])
-    return resized.crop((left, top, left + size[0], top + size[1]))
-
-
 def _contain(image: Image.Image, size, resample=Image.Resampling.LANCZOS) -> Image.Image:
     """Fit an actor inside a box, including intentional poster-size upscaling."""
     ratio = min(size[0] / image.width, size[1] / image.height)
     return image.resize((max(1, round(image.width * ratio)),
                          max(1, round(image.height * ratio))), resample)
-
-
-def _paper_scrap(source: Image.Image, size, angle, focus, seed) -> Image.Image:
-    image = _crop_fit(source, size, focus).convert("RGBA")
-    mask = Image.new("L", size, 0)
-    points = []
-    rng = random.Random(seed)
-    step = max(18, size[0] // 18)
-    for x in range(0, size[0] + step, step):
-        points.append((min(x, size[0]), rng.randrange(1, 8)))
-    for y in range(step, size[1] + step, step):
-        points.append((size[0] - rng.randrange(1, 8), min(y, size[1])))
-    for x in range(size[0] - step, -step, -step):
-        points.append((max(x, 0), size[1] - rng.randrange(1, 8)))
-    for y in range(size[1] - step, 0, -step):
-        points.append((rng.randrange(1, 8), y))
-    ImageDraw.Draw(mask).polygon(points, fill=255)
-    image.putalpha(mask)
-    # A faint paper wash turns busy gameplay into supporting texture while
-    # keeping the handwritten notes and distinct page themes recognizable.
-    wash = Image.new("RGBA", image.size, PAPER + (42,))
-    wash.putalpha(Image.eval(mask, lambda value: round(value * .24)))
-    image = Image.alpha_composite(image, wash)
-    return image.rotate(angle, Image.Resampling.BICUBIC, expand=True)
 
 
 def _shadowed_paste(canvas, layer, pos, shadow=13):
@@ -146,89 +124,74 @@ def _shadowed_paste(canvas, layer, pos, shadow=13):
 
 
 def render_key_art(size) -> Image.Image:
-    """Compose store key art from screenshots and runtime actor renderers."""
+    """Compose clean key art around the game's actual stickman protagonist."""
     pygame.init()
     width, height = size
     scale = height / 500
     canvas = Image.new("RGBA", size, (29, 28, 31, 255))
     draw = ImageDraw.Draw(canvas)
 
-    # Graphite scuffs keep the dark desk from reading as a flat UI panel.
-    rng = random.Random(923)
-    for _ in range(46):
-        x = rng.randrange(width)
-        y = rng.randrange(height)
-        length = rng.randrange(round(18 * scale), round(90 * scale))
-        draw.line((x, y, min(width, x + length), y + rng.randrange(-3, 4)),
-                  fill=(59, 56, 59, 120), width=max(1, round(scale)))
+    # One clean sheet makes the protagonist readable at storefront size.
+    inset = round(18 * scale)
+    sheet = Image.new("RGBA", (width - inset * 2, height - inset * 2), PAPER + (255,))
+    sheet_draw = ImageDraw.Draw(sheet)
+    rule_width = max(1, round(2 * scale))
+    for y in range(round(height * .18), sheet.height, round(height * .13)):
+        sheet_draw.line((0, y, sheet.width, y), fill=BLUE + (190,), width=rule_width)
+    margin_x = round(sheet.width * .11)
+    sheet_draw.line((margin_x, 0, margin_x, sheet.height),
+                    fill=(201, 103, 103, 230), width=max(2, round(3 * scale)))
+    # Slightly uneven lower edge keeps this a physical page, not a UI card.
+    mask = Image.new("L", sheet.size, 0)
+    ImageDraw.Draw(mask).polygon([
+        (0, 0), (sheet.width, 0), (sheet.width, sheet.height - round(8 * scale)),
+        (round(sheet.width * .82), sheet.height - round(3 * scale)),
+        (round(sheet.width * .63), sheet.height - round(10 * scale)),
+        (round(sheet.width * .43), sheet.height - round(4 * scale)),
+        (round(sheet.width * .22), sheet.height - round(11 * scale)), (0, sheet.height)
+    ], fill=255)
+    sheet.putalpha(mask)
+    _shadowed_paste(canvas, sheet, (inset, inset), max(5, round(10 * scale)))
 
-    ronin = Image.open(ROOT / "store" / "screenshots" / "page-1.png").convert("RGB")
-    western = Image.open(ROOT / "store" / "screenshots" / "page-2.png").convert("RGB")
-    space = Image.open(ROOT / "store" / "screenshots" / "baby-face-signature.png").convert("RGB")
+    # The real runtime stickman is the undisputed subject of the cover.
+    hero = _contain(hero_sprite(), (round(width * .43), round(height * .57)))
+    hx = round(width * .53)
+    hy = round(height * .34)
+    _shadowed_paste(canvas, hero, (hx, hy), max(4, round(7 * scale)))
 
-    left = _paper_scrap(ronin, (round(width * .48), round(height * .63)),
-                        -7, (.34, .58), 41)
-    right = _paper_scrap(western, (round(width * .44), round(height * .57)),
-                         7, (.63, .58), 57)
-    center = _paper_scrap(space, (round(width * .70), round(height * .77)),
-                          -1.5, (.54, .54), 79)
-    _shadowed_paste(canvas, left, (-round(width * .09), round(height * .24)))
-    _shadowed_paste(canvas, right, (round(width * .67), round(height * .20)))
-    _shadowed_paste(canvas, center, (round(width * .28), round(height * .17)))
-
-    # Cover the screenshot actors with larger copies drawn by the real runtime.
-    boss = _contain(baby_sprite(), (round(width * .34), round(height * .67)))
-    bx, by = round(width * .57), round(height * .27)
-    canvas.alpha_composite(boss, (bx, by))
-
-    hero = _contain(hero_sprite(), (round(width * .25), round(height * .31)))
-    hx, hy = round(width * .36), round(height * .62)
-    canvas.alpha_composite(hero, (hx, hy))
-
-    # The Artist enters from outside the key art and points at the encounter.
+    # The Artist enters from beyond the page, aimed at the character it made.
     hand = artist_sprite()
-    hand.thumbnail((round(width * .48), round(height * .47)), Image.Resampling.LANCZOS)
-    canvas.alpha_composite(hand, (width - hand.width + round(width * .05),
-                                  -round(height * .10)))
+    hand = _contain(hand, (round(width * .37), round(height * .34)))
+    canvas.alpha_composite(hand, (width - hand.width + round(width * .035),
+                                  -round(height * .045)))
 
     draw = ImageDraw.Draw(canvas)
-    # Excalibur's impossible finishing arc ties the small hero to the giant.
-    arc = (round(width * .32), round(height * .38),
-           round(width * .77), round(height * .90))
-    draw.arc(arc, 207, 331, fill=(231, 211, 130, 230),
+    # One hand-drawn action stroke gives motion without adding another subject.
+    arc = (round(width * .46), round(height * .29),
+           round(width * .95), round(height * .91))
+    draw.arc(arc, 197, 329, fill=(231, 204, 96, 245),
              width=max(4, round(8 * scale)))
-    draw.arc((arc[0] - 5, arc[1] + 4, arc[2] - 8, arc[3] + 8),
-             207, 331, fill=(153, 48, 45, 225),
-             width=max(2, round(3 * scale)))
+    draw.arc((arc[0] - round(4 * scale), arc[1] + round(5 * scale),
+              arc[2] - round(7 * scale), arc[3] + round(8 * scale)),
+             197, 329, fill=RED + (245,), width=max(2, round(3 * scale)))
 
-    # A solid title block gives thumbnail legibility while preserving the
-    # deliberately messy pages and runtime drawings beneath it.
-    tx, ty = round(width * .035), round(height * .035)
-    tw, th = round(width * .48), round(height * .27)
-    draw.rectangle((tx + 7, ty + 8, tx + tw + 7, ty + th + 8), fill=(0, 0, 0, 180))
-    draw.rectangle((tx, ty, tx + tw, ty + th), fill=(246, 239, 213, 255),
-                   outline=INK + (255,), width=max(2, round(3 * scale)))
-    top_font = _font(round(height * .074), True)
-    page_font = _font(round(height * .142), True)
-    draw.text((tx + round(15 * scale), ty + round(7 * scale)), "TURN THE",
+    tx, ty = round(width * .065), round(height * .08)
+    top_font = _font(round(height * .073), True)
+    page_font = _font(round(height * .178), True)
+    draw.text((tx, ty), "TURN THE",
               font=top_font, fill=INK + (255,))
-    draw.text((tx + round(12 * scale), ty + round(38 * scale)), "PAGE",
+    draw.text((tx - round(3 * scale), ty + round(34 * scale)), "PAGE",
               font=page_font, fill=INK + (255,))
-    underline = ty + th - round(15 * scale)
-    draw.line((tx + round(14 * scale), underline,
-               tx + tw - round(13 * scale), underline - round(4 * scale)),
+    underline = ty + round(124 * scale)
+    draw.line((tx, underline, tx + round(width * .36), underline - round(3 * scale)),
               fill=RED + (255,), width=max(3, round(6 * scale)))
 
     label_font = _font(round(height * .034), True)
-    label = "THE ARTIST DRAWS.  YOU FIGHT BACK."
-    label_box = draw.textbbox((0, 0), label, font=label_font)
-    lx = round(width * .04)
-    ly = height - round(height * .075)
-    pad = round(8 * scale)
-    draw.rectangle((lx - pad, ly - pad,
-                    lx + label_box[2] + pad, ly + label_box[3] + pad),
-                   fill=(29, 28, 31, 225))
-    draw.text((lx, ly), label, font=label_font, fill=(246, 239, 213, 255))
+    lx = round(width * .066)
+    ly = height - round(height * .15)
+    draw.text((lx, ly), "THE ARTIST DRAWS.", font=label_font, fill=INK + (255,))
+    draw.text((lx, ly + round(21 * scale)), "YOU FIGHT BACK.",
+              font=label_font, fill=RED + (255,))
     pygame.quit()
     return canvas.convert("RGB")
 
@@ -244,16 +207,14 @@ def render_icon(size=1024) -> Image.Image:
     draw.line((round(size * .12), 0, round(size * .12), size),
               fill=(201, 103, 103, 255), width=max(3, size // 170))
 
-    boss = _contain(baby_sprite(), (round(size * .69), round(size * .70)))
-    _shadowed_paste(plate, boss, (round(size * .29), round(size * .14)), size // 80)
-    hero = _contain(hero_sprite(), (round(size * .33), round(size * .34)))
-    _shadowed_paste(plate, hero, (round(size * .055), round(size * .61)), size // 95)
+    hero = _contain(hero_sprite(), (round(size * .76), round(size * .67)))
+    _shadowed_paste(plate, hero, (round(size * .13), round(size * .28)), size // 75)
 
     draw = ImageDraw.Draw(plate)
-    draw.arc((round(size * .04), round(size * .20), round(size * .80), round(size * .93)),
-             209, 334, fill=(232, 208, 110, 255), width=max(8, size // 58))
-    draw.arc((round(size * .03), round(size * .22), round(size * .78), round(size * .95)),
-             209, 334, fill=RED + (255,), width=max(3, size // 170))
+    draw.arc((round(size * .10), round(size * .16), round(size * .91), round(size * .91)),
+             201, 333, fill=(232, 208, 110, 255), width=max(8, size // 58))
+    draw.arc((round(size * .08), round(size * .19), round(size * .89), round(size * .94)),
+             201, 333, fill=RED + (255,), width=max(3, size // 170))
 
     radius = round(size * .16)
     mask = Image.new("L", (size, size), 0)
