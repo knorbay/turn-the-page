@@ -8,7 +8,7 @@
 
 # TURN THE PAGE — Beta 0.9.0
 
-Bu sürümün odağı bölüm kimliği, silah hissi, anlamlı sketchler ve güvenilir dövüş akışı. Beş sayfa, 23 zorunlu karşılaşma, 17 normal düşman türü, altı ana boss ve dev bebek sahnesi var.
+Bu sürümün odağı bölüm kimliği, silah hissi, anlamlı sketchler ve güvenilir dövüş akışı. Beş sayfa, 23 zorunlu karşılaşma, 20 normal düşman türü, altı ana boss ve dev bebek sahnesi var.
 
 ## Can
 

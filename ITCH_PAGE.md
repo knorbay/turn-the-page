@@ -11,7 +11,7 @@ six-shooter and double barrel through a ledger-paper West. Bank energy shots
 around orbital diagrams. Breach a carbon-copy office with an agent's suppressed
 pistol. Then face the version of the final boss that your own play style created.
 
-The beta contains five pages, 23 combat rooms, 17 ordinary enemy types, six
+The beta contains five pages, 23 combat rooms, 20 ordinary enemy types, six
 named bosses, twelve Lost Sketch techniques, four finale variants, and one very
 large baby face that makes the Artist reconsider fairness.
 

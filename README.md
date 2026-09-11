@@ -63,7 +63,7 @@ Common controllers, resizable windows, mouse aiming, audio sliders, achievements
 | II — Dust & Bad Decisions | Bowie knife, six-shooter, double barrel, ledger desert | 4 / Wanted Sketch, Railroad Stapler |
 | III — A Very Wrong Future | Ion Edge, Orbit Pulse, Null Cannon, orbital chart | 5 / Orbital Mistake; Baby-Face is an interlude |
 | IV — The Carbon Agent | Field knife, suppressed pistol, breach shotgun, carbon city | 5 / Head of Redaction |
-| V — The Last Draft | Mixed enemy roles, revised platforms, schoolwork | 5 / Final Editor |
+| V — The Last Draft | Redraw Pencil, mixed enemy roles, revised platforms, schoolwork | 5 / Final Editor |
 
 Baby-Face remains a staged comedy reversal: two authored one-hit defeats, the moustache and “It's more fair now.”, then a locked sword-drawing/pulling sequence and your winning strike. The real finale is on Page V.
 
