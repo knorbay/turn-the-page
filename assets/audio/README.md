@@ -29,10 +29,27 @@ The school pass adds these original sounds, without additional recordings:
   `sfx_snip.wav`, `sfx_ink_burst.wav`, `sfx_compass_sweep.wav`, and
   `sfx_stamp.wav`: seven different material/attack cues.
 
+The combat-polish bank adds 25 locally synthesized cue families and alternate
+takes. Page-specific tools now have separate physical signatures: bowie and
+field-knife cuts, an electronic ion slice, revolver and suppressed shots,
+double-barrel and breach blasts, a null cannon, and an orbit pulse. Enemy cues
+are grouped by readable action (telegraph, melee/ranged/charge attack) and by
+paper, ink, or metal hit/death material. Bosses can punctuate a phase change,
+vulnerability opening, or signature move with `boss_phase_shift`,
+`boss_opening`, and `boss_signature`.
+
+Repeated cues have deterministic `_v2`, `_v3`, and where useful `_v4` WAVs.
+Runtime rotates those takes, applies a small bounded pitch cycle, and enforces
+per-cue cooldowns so shotgun pellets and simultaneous enemy hits do not stack
+into clipping. `NotebookSounds.play(name)` remains valid; optional callers can
+also supply `variant`, `pitch`, `volume`, and `cooldown_ms`.
+
 The bell uses the SFX and master sliders, with a 0.60 cue gain to sit beside
 the strong combat impacts. Music falls to 40% during the ring
 and returns smoothly over its final 650 ms. Music, ambient Foley, classroom
 voices and the bell each use reserved channels, so combat bursts cannot
 interrupt them. Classroom voices use the music and master sliders, are mixed
-very quietly for each page's recording level, and become 35% quieter at full
-combat intensity. Baby-Face's reveal, stomps and hero sword are unchanged.
+very quietly for each page's recording level, and recede sharply during combat
+and boss encounters. Heavy attacks briefly make headroom in both music layers,
+then release without stopping or restarting the score. Baby-Face's reveal,
+stomps and hero sword are unchanged.

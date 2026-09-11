@@ -29,3 +29,12 @@ anyway so the origin and selection decision remain auditable.
 Retrieved and reviewed for the project on 2026-09-02. The earlier procedural
 composer remains as a deterministic fallback and still generates notebook
 UI, impact, arena, boss-reveal, and transition cues.
+
+## Original procedural combat bank
+
+All root-level `sfx_*.wav` files, including the `_v2`/`_v3`/`_v4` alternate
+takes and the weapon, enemy-material, and boss-phase cues added in the combat
+polish pass, are original deterministic renders from this repository's
+`audio_composer.py`. They contain no downloaded samples and introduce no new
+third-party license obligation. The same is true of `classroom_babble.wav`
+and the locally composed `page_*_*.wav` score fallbacks.

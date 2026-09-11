@@ -146,6 +146,128 @@ class PageArsenalContracts(unittest.TestCase):
         self.assertEqual(system.projectiles[0].bounces,4)
         self.assertAlmostEqual(system.projectiles[0].life,2.7*1.25)
 
+    def test_katana_draw_return_and_rising_cut_change_position_and_launch(self):
+        system,ctx=self.setup_weapon(0,"pencil_blade")
+        target=SimpleNamespace(rect=pygame.Rect(145,538,32,52),hp=12,max_hp=12,
+                               dead=False,active=True,vx=0,vy=0)
+        system.update(.01,ctx,[target])
+        self.assertTrue(system.handle_input(fire_pressed=True,aim={"direction":(1,0)},ctx=ctx))
+        self.assertEqual(system.melee.damage_kind,"katana_draw")
+        self.assertGreater(ctx.player.vx,120,"the draw cut must carry the player into range")
+
+        system.current.cooldown=0;ctx.player.vx=0
+        system.combo_index=1;system.combo_window=1
+        self.assertTrue(system.handle_input(fire_pressed=True,aim={"direction":(1,0)},ctx=ctx))
+        self.assertEqual(system.melee.damage_kind,"katana_return")
+        self.assertLess(ctx.player.vx,-70,"the return stroke must recover away from the target")
+
+        system.current.cooldown=0;ctx.player.vx=0
+        system.combo_index=2;system.combo_window=1
+        self.assertTrue(system.handle_input(fire_pressed=True,aim={"direction":(1,0)},ctx=ctx))
+        system.update(.05,ctx,[target])
+        self.assertEqual(target.last_weapon_hit,"katana_rise")
+        self.assertLessEqual(target.vy,-395,"the rising finisher must launch ordinary enemies")
+
+    def test_bowie_only_cashes_out_a_combo_kept_on_one_target(self):
+        system,ctx=self.setup_weapon(1,"pencil_blade")
+        marked=SimpleNamespace(rect=pygame.Rect(138,542,30,48),hp=10,max_hp=10,
+                               dead=False,active=True,vx=0)
+        for combo in (1,2):
+            system.current.cooldown=0
+            system.combo_index=combo-1
+            system.combo_window=1 if combo>1 else 0
+            system.handle_input(fire_pressed=True,aim={"direction":(1,0)},ctx=ctx)
+            system.update(.05,ctx,[marked])
+        self.assertEqual(system._bowie_marks[id(marked)][0],2)
+        before=marked.hp
+        system.current.cooldown=0;system.combo_index=2;system.combo_window=1
+        system.handle_input(fire_pressed=True,aim={"direction":(1,0)},ctx=ctx)
+        system.update(.05,ctx,[marked])
+        marked_finisher=before-marked.hp
+        self.assertGreater(marked_finisher,2.5)
+        self.assertNotIn(id(marked),system._bowie_marks)
+
+        fresh=SimpleNamespace(rect=marked.rect.copy(),hp=10,max_hp=10,
+                              dead=False,active=True,vx=0)
+        system.current.cooldown=0;system.combo_index=2;system.combo_window=1
+        system.handle_input(fire_pressed=True,aim={"direction":(1,0)},ctx=ctx)
+        system.update(.05,ctx,[fresh])
+        self.assertLess(10-fresh.hp,marked_finisher,
+                        "switching targets must forfeit the Bowie cash-out")
+
+    def test_ion_edge_finisher_fires_a_piercing_corridor_wave(self):
+        system,ctx=self.setup_weapon(2,"pencil_blade")
+        system.combo_index=2;system.combo_window=1
+        system.handle_input(fire_pressed=True,aim={"direction":(1,0)},ctx=ctx)
+        wave=system.projectiles[0]
+        self.assertEqual((wave.kind,wave.visual,wave.pierce),("ion_wave","ion_wave",3))
+        targets=[SimpleNamespace(rect=pygame.Rect(x,542,24,42),hp=5,max_hp=5,
+                                 dead=False,active=True,vx=0)
+                 for x in (245,325,405)]
+        for _ in range(30):
+            system.update(1/60,ctx,targets)
+        self.assertTrue(all(target.hp<5 for target in targets),
+                        "lining enemies up must let one ion wave cut through all three")
+
+    def test_field_knife_executes_wounded_target_and_recovers_immediately(self):
+        system,ctx=self.setup_weapon(3,"pencil_blade")
+        wounded=SimpleNamespace(rect=pygame.Rect(138,542,30,48),hp=2,max_hp=10,
+                                dead=False,active=True,vx=0)
+        system.combo_index=2;system.combo_window=1
+        system.handle_input(fire_pressed=True,aim={"direction":(1,0)},ctx=ctx)
+        self.assertLess(system.current.cooldown,.20)
+        system.update(.05,ctx,[wounded])
+        self.assertTrue(wounded.dead)
+        self.assertLessEqual(system.current.cooldown,.055)
+
+        healthy=SimpleNamespace(rect=wounded.rect.copy(),hp=8,max_hp=10,
+                                dead=False,active=True,vx=0)
+        system.current.cooldown=0;system.combo_index=2;system.combo_window=1
+        system.handle_input(fire_pressed=True,aim={"direction":(1,0)},ctx=ctx)
+        system.update(.05,ctx,[healthy])
+        self.assertFalse(healthy.dead,"the same input must not execute a healthy target")
+
+    def test_final_pencil_retraces_each_hit_after_a_visible_delay(self):
+        system,ctx=self.setup_weapon(4,"pencil_blade")
+        target=SimpleNamespace(rect=pygame.Rect(145,542,30,48),hp=10,max_hp=10,
+                               dead=False,active=True,vx=0)
+        system.handle_input(fire_pressed=True,aim={"direction":(1,0)},ctx=ctx)
+        swing=system.melee
+        self.assertEqual(swing.style,"redraw_pencil")
+        self.assertGreater(swing.echo_from,swing.active_to)
+        system.update(.05,ctx,[target])
+        after_original=target.hp
+        self.assertAlmostEqual(after_original,9.1)
+        for _ in range(4):
+            system.update(.05,ctx,[target])
+        self.assertLess(target.hp,after_original)
+        self.assertEqual(target.last_weapon_hit,"redraw_echo")
+
+    def test_each_starter_announces_its_own_material_sound(self):
+        expected=("katana_cut","bowie_cut","ion_slice","field_knife","blade")
+        heard=[]
+        for page in range(5):
+            system,ctx=self.setup_weapon(page,"pencil_blade")
+            played=[]
+            ctx.sounds.play=played.append
+            system.handle_input(fire_pressed=True,aim={"direction":(1,0)},ctx=ctx)
+            heard.append(played[-1])
+        self.assertEqual(tuple(heard),expected)
+        self.assertEqual(len(set(heard)),5)
+
+    def test_starter_slash_feedback_has_five_distinct_signatures(self):
+        signatures=[]
+        for page in range(5):
+            system,ctx=self.setup_weapon(page,"pencil_blade")
+            system.combo_index=2;system.combo_window=1
+            system.handle_input(fire_pressed=True,aim={"direction":(1,0)},ctx=ctx)
+            system.melee.elapsed=system.melee.active_from+.025
+            surface=pygame.Surface((1120,700),pygame.SRCALPHA)
+            system._draw_melee(surface,ctx.camera)
+            signatures.append(pygame.image.tobytes(surface,"RGBA"))
+            self.assertTrue(surface.get_bounding_rect().width)
+        self.assertEqual(len(set(signatures)),5)
+
     def test_inventory_draws_only_earned_allowed_silhouettes_without_slot_numbers(self):
         system,ctx=self.setup_weapon(1,"pencil_blade")
         system.set_page_loadout(("pencil_blade","ink_pistol","marker_shotgun"))

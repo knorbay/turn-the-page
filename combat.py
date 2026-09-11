@@ -637,6 +637,9 @@ class CombatArena:
                     "star_scout": "ranged",
                     "moon_bot": "space_control",
                     "lantern_yokai": "ranged",
+                    "gutter_lantern": "vertical",
+                    "rake_cactus": "space_control",
+                    "ember_hound": "terrain_control",
                     "cactus_gunner": "space_control",
                     "comet_hound": "horizontal",
                 }.get(normalized_kind, "boss" if getattr(enemy, "is_boss", False) else "pressure")
@@ -684,6 +687,7 @@ class CombatArena:
             "counter_cut", "red_stamp", "proof_volley", "margin_burst",
             "agent_burst", "shear", "drop", "echo_slash",
             "bounty_volley", "rail_rush", "staple_columns", "moon_release", "meteor_fall",
+            "return_sweep", "cross_cut", "redaction_wall",
         }
         telegraphs = {state for state in (
             "charge_telegraph", "dive_telegraph", "slam_telegraph",
@@ -692,7 +696,7 @@ class CombatArena:
             "sheath", "snicker", "quickdraw", "rustle", "lock", "scan",
             "flare", "prickle", "tail_warn", "ram_warn", "agent_aim", "cut_warn", "drop_warn", "copy",
             "sweep_telegraph", "bounty_draw", "rail_whistle", "staple_columns_warn",
-            "moon_release_warn", "meteor_warn",
+            "moon_release_warn", "meteor_warn", "return_whistle", "return_telegraph", "cross_warn",
         )}
         active = sum(getattr(enemy, "state", "") in committed | telegraphs
                      for enemy in self.enemies if not getattr(enemy, "dead", False))
@@ -721,7 +725,7 @@ class CombatArena:
             "counter_cut", "red_stamp", "proof_volley", "margin_burst",
             "agent_aim", "agent_burst", "cut_warn", "shear", "drop_warn",
             "sweep_telegraph", "bounty_draw", "rail_whistle", "staple_columns_warn",
-            "moon_release_warn", "meteor_warn", "bounty_volley", "rail_rush",
+            "moon_release_warn", "meteor_warn", "return_whistle", "return_telegraph", "cross_warn", "bounty_volley", "rail_rush",
             "staple_columns", "moon_release", "meteor_fall",
         }
         danger = sum(getattr(enemy, "state", "") in danger_states for enemy in live)

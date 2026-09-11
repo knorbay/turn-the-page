@@ -8,7 +8,12 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from audio_composer import NotebookComposer, SFX_NAMES, write_wav
+from audio_composer import (
+    NotebookComposer,
+    SFX_NAMES,
+    SFX_VARIANT_COUNTS,
+    write_wav,
+)
 
 
 def build(destination: Path, pages=range(5)) -> list[Path]:
@@ -16,9 +21,13 @@ def build(destination: Path, pages=range(5)) -> list[Path]:
     composer = NotebookComposer(22050)
     outputs: list[Path] = []
     for name in SFX_NAMES:
-        path = destination / f"sfx_{name}.wav"
-        write_wav(str(path), composer.sfx(name), composer.sample_rate)
-        outputs.append(path)
+        for variation in range(SFX_VARIANT_COUNTS.get(name, 1)):
+            suffix = "" if variation == 0 else f"_v{variation + 1}"
+            path = destination / f"sfx_{name}{suffix}.wav"
+            write_wav(
+                str(path), composer.sfx(name, variation), composer.sample_rate,
+            )
+            outputs.append(path)
     classroom = destination / "classroom_babble.wav"
     write_wav(str(classroom), composer.classroom(), composer.sample_rate)
     outputs.append(classroom)

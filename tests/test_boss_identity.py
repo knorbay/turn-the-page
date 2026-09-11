@@ -121,3 +121,76 @@ class BossIdentityContracts(unittest.TestCase):
             self.assertTrue(boss.vulnerable)
             self.assertEqual(boss.projectiles,[])
             self.game.player.x,self.game.player.y=340,542
+
+    def test_second_compass_sweep_returns_before_opening(self):
+        boss=MoonCompassBoss(550)
+        boss.phase=2
+        boss._set_state('sweep',.01)
+        boss.update(.02,self.ctx,(100,1100))
+        self.assertEqual(boss.state,'return_telegraph')
+        self.assertFalse(boss.vulnerable)
+        boss.update(.5,self.ctx,(100,1100))
+        self.assertEqual(boss.state,'return_sweep')
+        boss.update(.6,self.ctx,(100,1100))
+        self.assertTrue(boss.vulnerable)
+
+    def test_destroying_a_poster_does_not_retarget_the_remaining_guns(self):
+        boss=WantedSketchBoss(600)
+        boss.phase=2
+        boss._shuffle(self.ctx,(100,1100))
+        self.assertEqual(len(boss.combat_targets),3)
+        survivor=boss.combat_targets[-1]
+        frozen=survivor.bounty_target
+        boss.combat_targets[0].dead=True
+        self.game.player.x=900
+        boss._set_state('bounty_volley',.7)
+        boss.update(.01,self.ctx,(100,1100))
+        self.assertEqual(survivor.bounty_target,frozen)
+        shot=boss.projectiles[-1]
+        direction=pygame.Vector2(frozen)-pygame.Vector2(survivor.x,survivor.y-56)
+        self.assertAlmostEqual(pygame.Vector2(shot.vx,shot.vy).normalize().dot(direction.normalize()),1)
+
+    def test_express_train_warns_once_before_returning_then_opens(self):
+        boss=RailroadStaplerBoss(1017)
+        boss.phase=2;boss.facing=1
+        boss._set_state('rail_rush',2)
+        boss.update(.016,self.ctx,(100,1100))
+        self.assertEqual(boss.state,'return_whistle')
+        self.assertEqual(boss.facing,-1)
+        boss.x=183;boss._set_state('rail_rush',2)
+        boss.update(.016,self.ctx,(100,1100))
+        self.assertEqual(boss.state,'staple_columns_warn')
+
+    def test_orbital_phase_change_restores_distinct_armour_without_healing(self):
+        boss=OrbitalMistakeBoss(600)
+        boss.orbiters=[];boss._set_state('unravel',3)
+        boss.hp=7
+        boss.hit_from_weapon(1,0,300,{'ink'},self.ctx)
+        self.assertEqual(boss.hp,6)
+        self.assertEqual(len(boss.orbiters),4)
+        self.assertFalse(boss.vulnerable)
+        boss._prepare_release_targets(self.ctx,(100,1100))
+        self.assertEqual(len(set(boss.release_targets.values())),4)
+
+    def test_scissor_cross_uses_visible_lines_and_finite_opening(self):
+        from advanced_enemies import ScissorDirector
+        boss=ScissorDirector(600)
+        boss.phase=2;boss.target_x=352
+        boss._set_state('cross_cut',.58)
+        health=self.game.player.health
+        for _ in range(40):boss.update(1/60,self.ctx,(100,1100))
+        self.assertTrue(boss.vulnerable)
+        self.assertGreaterEqual(self.game.player.health,health-1)
+
+    def test_final_clean_margin_is_safe_and_redaction_ends(self):
+        boss=FinalEditorBoss(600)
+        boss.phase=3;boss.scenario='precise';boss.arena_bounds=(100,1100)
+        boss._start_pattern(self.ctx)
+        self.assertEqual(boss.pattern,'redaction_wall')
+        frozen=boss.safe_margin
+        boss._launch_pattern(self.ctx,(100,1100))
+        health=self.game.player.health
+        for _ in range(75):boss.update(1/60,self.ctx,(100,1100))
+        self.assertEqual(self.game.player.health,health)
+        self.assertEqual(boss.safe_margin,frozen)
+        self.assertTrue(boss.vulnerable)

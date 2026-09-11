@@ -1,3 +1,11 @@
+## Son combat cilası
+
+- Üç yeni düşman: kilitli mürekkep sütunu, üçlü alçak iğne yaylımı ve hücumdan sonra kıvılcım izi.
+- Beş sayfanın başlangıç yakın dövüş silahı ayrı kombolara ve özel etkilere sahip.
+- Altı gerçek boss yeni fazlar ve okunabilir karşı hamleler kazandı; Baby Face sekansı korundu.
+- Silah sesleri, düşman uyarıları ve boss faz/açıklık sesleri çeşitlendirildi.
+- 138 test geçti; beş sayfalık otomatik rota tamamlandı. İnsan oyuncuyla zorluk ve his testi hâlâ gerekli.
+
 # TURN THE PAGE — Beta 0.9.0
 
 Bu sürümün odağı bölüm kimliği, silah hissi, anlamlı sketchler ve güvenilir dövüş akışı. Beş sayfa, 23 zorunlu karşılaşma, 17 normal düşman türü, altı ana boss ve dev bebek sahnesi var.

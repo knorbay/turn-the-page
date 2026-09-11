@@ -148,6 +148,33 @@ class ImpactMark:
         elif self.kind == "marker":
             pygame.draw.circle(surface, (48,48,57,alpha), (x, y), radius, 2)
             pygame.draw.circle(surface, (86,82,91,alpha), (x - 2, y - 2), max(1, radius // 3), 1)
+        elif self.kind == "ion_wave":
+            pygame.draw.arc(surface, (74, 136, 158, alpha),
+                            (x-radius, y-radius, radius*2, radius*2), -.75, .75, 3)
+            pygame.draw.line(surface, (215, 232, 230, alpha),
+                             (x-radius, y), (x+radius, y), 1)
+        elif self.kind.startswith("bowie"):
+            for index in range(3 if self.kind.endswith("finisher") else 1):
+                ox = index * 5 - 5
+                pygame.draw.line(surface, (143, 88, 55, alpha),
+                                 (x-radius+ox, y+radius), (x+radius+ox, y-radius), 2)
+        elif self.kind.startswith("field"):
+            pygame.draw.line(surface, (68, 96, 82, alpha),
+                             (x-radius, y+3), (x+radius, y-3), 2)
+            if self.kind.endswith("finisher"):
+                pygame.draw.line(surface, (68, 96, 82, alpha),
+                                 (x-radius//2, y-radius), (x+radius//2, y+radius), 2)
+        elif self.kind.startswith("redraw"):
+            pygame.draw.line(surface, (64, 61, 60, alpha),
+                             (x-radius, y+radius//2), (x+radius, y-radius//2), 2)
+            pygame.draw.line(surface, (165, 60, 63, alpha),
+                             (x-radius+4, y+radius//2+4), (x+radius+4, y-radius//2+4), 2)
+        elif self.kind.startswith("katana"):
+            angle = -.9 if self.kind.endswith("rise") else -.35
+            end = (x + math.cos(angle) * radius, y + math.sin(angle) * radius)
+            start = (x - math.cos(angle) * radius, y - math.sin(angle) * radius)
+            pygame.draw.line(surface, (151, 61, 58, alpha), start, end,
+                             3 if self.kind.endswith("rise") else 2)
         elif self.kind in ("pencil", "pencil_finisher"):
             for i in range(3):
                 ox=rng.randrange(-7,8);oy=rng.randrange(-5,6)
@@ -172,12 +199,34 @@ class MeleeSwing:
     reach: float
     knockback: float
     stagger: float
+    style: str = "pencil"
+    damage_kind: str = "pencil"
+    echo_from: float = 0.0
+    echo_to: float = 0.0
+    echo_damage: float = 0.0
     elapsed: float = 0.0
     hit_ids: set[int] = field(default_factory=set)
+    echo_hit_ids: set[int] = field(default_factory=set)
 
     @property
     def active(self):
+        return self.primary_active or self.echo_active
+
+    @property
+    def primary_active(self):
         return self.active_from <= self.elapsed <= self.active_to
+
+    @property
+    def echo_active(self):
+        return self.echo_damage > 0 and self.echo_from <= self.elapsed <= self.echo_to
+
+    @property
+    def current_hit_ids(self):
+        return self.echo_hit_ids if self.echo_active and not self.primary_active else self.hit_ids
+
+    @property
+    def current_damage(self):
+        return self.damage * self.echo_damage if self.echo_active and not self.primary_active else self.damage
 
     @property
     def finished(self):
@@ -186,16 +235,32 @@ class MeleeSwing:
     def hit_rect(self, player):
         origin = pygame.Vector2(player.center_x, player.rect.centery)
         center = origin + self.direction * (self.reach * .53)
-        height = 74 if self.combo == 3 else 54
+        if self.style == "bowie":
+            height = 50 if self.combo == 3 else 42
+        elif self.style == "field_knife":
+            height = 58 if self.combo == 3 else 40
+        elif self.style == "katana" and self.combo == 3:
+            height = 104
+            center.y -= 18
+        elif self.style == "ion_blade":
+            height = 86 if self.combo == 3 else 62
+        else:
+            height = 74 if self.combo == 3 else 54
         width = round(self.reach * max(.55, abs(self.direction.x)))
-        width = max(48, width)
+        width = max(38 if self.style in ("bowie", "field_knife") else 48, width)
         return pygame.Rect(round(center.x - width / 2), round(center.y - height / 2), width, height)
 
     def pencil_pose(self):
         """Three authored strokes; animation shares the real active interval."""
         facing = 1 if self.direction.x >= 0 else -1
         base = math.atan2(self.direction.y, self.direction.x)
-        start, finish = {1: (-1.05, .65), 2: (.80, -.78), 3: (-1.45, .92)}[self.combo]
+        strokes = {
+            "katana": {1: (-.38, .28), 2: (.34, -.24), 3: (.88, -1.08)},
+            "bowie": {1: (-.58, .24), 2: (.44, -.22), 3: (-.82, .48)},
+            "ion_blade": {1: (-1.22, .86), 2: (1.12, -.96), 3: (-1.58, 1.18)},
+            "field_knife": {1: (-.18, .06), 2: (.16, -.05), 3: (-.34, .18)},
+        }.get(self.style, {1: (-1.05, .65), 2: (.80, -.78), 3: (-1.45, .92)})
+        start, finish = strokes[self.combo]
         if self.elapsed < self.active_from:
             t = _clamp(self.elapsed / self.active_from, 0, 1)
             offset = start * (.66 + .34*t)
@@ -347,11 +412,23 @@ class PaperProjectile:
             return
         points = [(camera.screen_x(x), round(y + camera.offset_y)) for x, y in self.trail]
         if len(points) > 1:
-            color = ((69, 123, 148) if self.visual in ("pulse", "null") else
+            color = ((69, 123, 148) if self.visual in ("pulse", "null", "ion_wave") else
                      (101, 97, 91) if self.kind != "marker" else (66, 61, 72))
-            pygame.draw.lines(surface, color, False, points, 2 if self.visual == "pulse" else 1)
+            pygame.draw.lines(surface, color, False, points,
+                              3 if self.visual == "ion_wave" else 2 if self.visual == "pulse" else 1)
         x, y = camera.screen_x(self.x), round(self.y + camera.offset_y)
-        if self.visual == "pulse":
+        if self.visual == "ion_wave":
+            direction = pygame.Vector2(self.vx, self.vy)
+            if direction.length_squared() > 0:
+                direction = direction.normalize()
+            normal = pygame.Vector2(-direction.y, direction.x)
+            back = pygame.Vector2(x, y) - direction * 13
+            front = pygame.Vector2(x, y) + direction * 7
+            pygame.draw.lines(surface, (64, 111, 139), False,
+                              [back + normal*12, front, back - normal*12], 3)
+            pygame.draw.lines(surface, (222, 236, 232), False,
+                              [back + normal*7, front-direction*2, back-normal*7], 1)
+        elif self.visual == "pulse":
             pygame.draw.circle(surface, (64, 109, 139), (x,y), self.radius, 2)
             pygame.draw.circle(surface, (215, 230, 226), (x,y), max(1,self.radius-3))
             pygame.draw.line(surface, (83, 126, 148), (x-self.radius-3,y), (x+self.radius+3,y), 1)
@@ -446,35 +523,129 @@ class PencilBlade(BaseWeapon):
     fire_delay = .34
 
     def fire(self, system, ctx):
+        profile = system.profile()
+        style = profile.silhouette
         combo = system.combo_index + 1 if system.combo_window > 0 else 1
         if combo > 3:
             combo = 1
         system.combo_index = combo
-        system.combo_window = .62 if combo < 3 else .18
-        durations = {1: .25, 2: .28, 3: .46}
-        damage = {1: 1.0, 2: 1.15, 3: 2.8}
-        reach = {1: 61, 2: 67, 3: 91}
-        profile = system.profile()
+
+        # Each page's starter uses a different combat grammar.  The save id is
+        # intentionally stable, but these are authored attacks rather than one
+        # combo with renamed stats.
+        if style == "katana":
+            durations = {1: .25, 2: .28, 3: .46}
+            damage = {1: 1.15, 2: .95, 3: 2.45}
+            reach = {1: 61, 2: 67, 3: 91}
+            active_to = {1: .16, 2: .16, 3: .25}
+            knockback = {1: 230, 2: 90, 3: 255}
+            stagger = {1: .16, 2: .08, 3: .72}
+            damage_kind = {1: "katana_draw", 2: "katana_return", 3: "katana_rise"}[combo]
+            combo_window = .67
+        elif style == "bowie":
+            durations = {1: .18, 2: .19, 3: .29}
+            damage = {1: .72, 2: .78, 3: 1.30}
+            reach = {1: 58, 2: 55, 3: 64}
+            active_to = {1: .105, 2: .11, 3: .17}
+            knockback = {1: 65, 2: 45, 3: 185}
+            stagger = {1: .07, 2: .07, 3: .42}
+            damage_kind = "bowie_finisher" if combo == 3 else "bowie_cut"
+            combo_window = .48
+        elif style == "ion_blade":
+            durations = {1: .24, 2: .25, 3: .40}
+            damage = {1: .82, 2: .90, 3: 1.55}
+            reach = {1: 66, 2: 72, 3: 86}
+            active_to = {1: .14, 2: .15, 3: .23}
+            knockback = {1: 105, 2: 115, 3: 245}
+            stagger = {1: .08, 2: .10, 3: .48}
+            damage_kind = "ion_edge_finisher" if combo == 3 else "ion_edge"
+            combo_window = .58
+        elif style == "field_knife":
+            durations = {1: .15, 2: .16, 3: .25}
+            damage = {1: .62, 2: .68, 3: 1.35}
+            reach = {1: 54, 2: 56, 3: 63}
+            active_to = {1: .085, 2: .09, 3: .14}
+            knockback = {1: 40, 2: 45, 3: 155}
+            stagger = {1: .04, 2: .04, 3: .30}
+            damage_kind = "field_finisher" if combo == 3 else "field_knife"
+            combo_window = .39
+        else:
+            durations = {1: .25, 2: .28, 3: .46}
+            damage = {1: 1.0, 2: 1.15, 3: 2.8}
+            reach = {1: 61, 2: 67, 3: 91}
+            active_to = {1: .16, 2: .16, 3: .25}
+            knockback = {1: 175, 2: 175, 3: 410}
+            stagger = {1: .12, 2: .12, 3: .70}
+            damage_kind = "redraw_finisher" if style == "redraw_pencil" and combo == 3 else (
+                "redraw" if style == "redraw_pencil" else
+                "pencil_finisher" if combo == 3 else "pencil"
+            )
+            combo_window = .62
+
+        system.combo_window = combo_window if combo < 3 else .18
         duration = durations[combo] * profile.tempo
         reach = reach[combo]*profile.reach_scale + (getattr(system.player,"sketch_finisher_reach",0) if combo == 3 else 0)
+        active_from = (.025 if style in ("bowie", "field_knife") else .045) * profile.tempo
+        strike_to = active_to[combo] * profile.tempo
+        echo_from = echo_to = echo_damage = 0.0
+        if style == "redraw_pencil":
+            echo_from = strike_to + .055
+            echo_to = echo_from + (.075 if combo < 3 else .105)
+            echo_damage = {1: .55, 2: .60, 3: .70}[combo]
+            duration = max(duration, echo_to + .055)
         system.melee = MeleeSwing(combo, system.aim_direction, duration,
-                                  .045*profile.tempo, (.16 if combo < 3 else .25)*profile.tempo,
+                                  active_from, strike_to,
                                   damage[combo]*profile.damage, reach,
-                                  175 if combo < 3 else 410, .12 if combo < 3 else .7)
-        # A short authored step makes the blade close small gaps without
-        # turning it into target-snapping.  The finisher commits farther and
-        # therefore feels different before damage numbers enter the picture.
-        step = {1: 48, 2: 62, 3: 96}[combo]
+                                  knockback[combo], stagger[combo], style=style,
+                                  damage_kind=damage_kind, echo_from=echo_from,
+                                  echo_to=echo_to, echo_damage=echo_damage)
+
+        target_range = {"katana": 190, "bowie": 112, "ion_blade": 170,
+                        "field_knife": 102, "redraw_pencil": 155}.get(style, 165)
+        step = {
+            "katana": {1: 165, 2: -105, 3: 74},
+            "bowie": {1: 92, 2: 70, 3: 48},
+            "ion_blade": {1: 38, 2: 32, 3: 18},
+            "field_knife": {1: 78, 2: 68, 3: 54},
+            "redraw_pencil": {1: 40, 2: 46, 3: 62},
+        }.get(style, {1: 48, 2: 62, 3: 96})[combo]
+        target_ahead = system.melee_target_ahead(target_range)
         if (abs(system.aim_direction.x) > .25 and not system.player.dashing
-                and abs(system.player.vx) < 230
-                and system.melee_target_ahead(165)):
+                and abs(system.player.vx) < 230 and target_ahead):
             system.player.vx = _clamp(
                 system.player.vx + system.aim_direction.x * step, -390, 390,
             )
-        self.cooldown = duration * (.78 if combo < 3 else .94)
-        _call(ctx, "sounds", "play", "katana_cut" if combo == 3 or
-              getattr(system.player, "page_style", "") == "ronin" else "blade")
-        _call(ctx, "camera", "kick", 1.2 if combo < 3 else 3.2, .08 if combo < 3 else .15)
+
+        # Ion Edge's third input covers a corridor instead of only enlarging
+        # the melee box.  Its finite pierce count makes lining enemies up matter.
+        if style == "ion_blade" and combo == 3:
+            origin = system.muzzle(34)
+            direction = system.aim_direction
+            system.projectiles.append(PaperProjectile(
+                "ion_wave", origin.x, origin.y, direction.x * 780, direction.y * 780,
+                1.25, 15, .48, 125, .18, pierce=3,
+                seed=system.next_seed(), visual="ion_wave",
+            ))
+            system.impact(origin.x, origin.y, "ion_wave", 18)
+
+        recovery = ({"bowie": .67, "field_knife": .58, "ion_blade": .76,
+                     "redraw_pencil": .96}.get(style, .78)
+                    if combo < 3 else
+                    {"bowie": .78, "field_knife": .72, "ion_blade": .88,
+                     "redraw_pencil": .98}.get(style, .94))
+        self.cooldown = duration * recovery
+        cut_sound = {
+            "katana": "katana_cut",
+            "bowie": "bowie_cut",
+            "ion_blade": "ion_slice",
+            "field_knife": "field_knife",
+        }.get(style, "blade")
+        _call(ctx, "sounds", "play", cut_sound)
+        kick = ({"bowie": .8, "field_knife": .45, "ion_blade": 1.0,
+                 "redraw_pencil": .7}.get(style, 1.2) if combo < 3 else
+                {"bowie": 2.6, "field_knife": 1.8, "ion_blade": 3.8,
+                 "redraw_pencil": 3.0}.get(style, 3.2))
+        _call(ctx, "camera", "kick", kick, .07 if combo < 3 else .15)
         return True
 
 
@@ -597,7 +768,8 @@ class Excalibur(BaseWeapon):
         system.combo_index = 3
         system.combo_window = .18
         system.melee = MeleeSwing(3, system.aim_direction, .52,
-                                  .06, .35, 4.0, 158, 620, 1.0)
+                                  .06, .35, 4.0, 158, 620, 1.0,
+                                  style="excalibur", damage_kind="excalibur")
         if not system.player.dashing:
             system.player.vx = _clamp(
                 system.player.vx + system.aim_direction.x * 190, -460, 460,
@@ -644,6 +816,7 @@ class WeaponSystem:
         self.fire_buffer = 0.0
         self.active_loadout: set[str] | None = None
         self._boss_marker_volleys: set[tuple[int, int]] = set()
+        self._bowie_marks: dict[int, tuple[int, float]] = {}
 
     @property
     def ammo(self):
@@ -681,6 +854,8 @@ class WeaponSystem:
         changed = self.page_index != page_index
         self.page_index = page_index
         self.player.arsenal_page = page_index
+        if changed:
+            self._bowie_marks.clear()
         for weapon_id, weapon in self.weapons.items():
             if weapon_id == "excalibur":
                 continue
@@ -756,6 +931,7 @@ class WeaponSystem:
         self.combo_window = 0
         self.fire_buffer = 0
         self._boss_marker_volleys.clear()
+        self._bowie_marks.clear()
         for weapon in self.weapons.values():
             weapon.cooldown = 0
             weapon.reload_timer = 0
@@ -776,6 +952,7 @@ class WeaponSystem:
         self.combo_index = 0
         self.combo_window = 0
         self.fire_buffer = 0
+        self._bowie_marks.clear()
         return True
 
     def cycle(self, direction=1):
@@ -827,6 +1004,11 @@ class WeaponSystem:
             weapon.update(dt)
         self.fire_buffer = max(0, self.fire_buffer - dt)
         self.combo_window = max(0, self.combo_window - dt)
+        self._bowie_marks = {
+            identity: (count, remaining-dt)
+            for identity, (count, remaining) in self._bowie_marks.items()
+            if remaining > dt
+        }
         if self.combo_window <= 0 and self.melee is None:
             self.combo_index = 0
         live = _live_enemies(enemies)
@@ -838,15 +1020,53 @@ class WeaponSystem:
                 for enemy in live:
                     identity = id(enemy)
                     rect = _enemy_rect(enemy)
-                    if identity in self.melee.hit_ids or rect is None or not hitbox.colliderect(rect):
+                    hit_ids = self.melee.current_hit_ids
+                    if identity in hit_ids or rect is None or not hitbox.colliderect(rect):
                         continue
-                    self.melee.hit_ids.add(identity)
+                    hit_ids.add(identity)
                     direction = 1 if self.melee.direction.x >= 0 else -1
-                    kind = ("excalibur" if self.current_id == "excalibur" else
-                            "pencil_finisher" if self.melee.combo == 3 else "pencil")
-                    self.damage_enemy(enemy, self.melee.damage, direction, self.melee.knockback,
-                                      self.melee.stagger, kind, ctx)
-                    self.impact(rect.centerx, rect.centery, kind, 20 if self.melee.combo == 3 else 12)
+                    swing = self.melee
+                    echoing = swing.echo_active and not swing.primary_active
+                    damage = swing.current_damage
+                    knockback = swing.knockback * (.58 if echoing else 1.0)
+                    stagger = swing.stagger * (.55 if echoing else 1.0)
+                    kind = ("redraw_echo_finisher" if echoing and swing.combo == 3 else
+                            "redraw_echo" if echoing else swing.damage_kind)
+
+                    # Bowie cuts only cash out when all three strokes stay on
+                    # one target.  Whiffing or changing targets loses the bonus.
+                    bowie_marks = self._bowie_marks.get(identity, (0, 0))[0]
+                    if swing.style == "bowie" and swing.combo == 3:
+                        damage += min(2, bowie_marks) * .72
+
+                    # The field knife is deliberately weak at opening a fight,
+                    # then becomes lethal once a non-boss is visibly wounded.
+                    hp_before = float(getattr(enemy, "hp", 1))
+                    max_hp = float(getattr(enemy, "max_hp", max(1, hp_before)))
+                    wounded = max_hp > 0 and hp_before / max_hp <= .55
+                    if swing.style == "field_knife" and swing.combo == 3 and wounded:
+                        damage = (max(damage, hp_before) if not getattr(enemy, "is_boss", False)
+                                  and getattr(enemy, "kind", "") != "boss" else damage * 1.45)
+
+                    applied = self.damage_enemy(enemy, damage, direction, knockback,
+                                                stagger, kind, ctx)
+                    if applied and swing.style == "bowie":
+                        if swing.combo < 3:
+                            self._bowie_marks[identity] = (min(2, bowie_marks + 1), .86)
+                        else:
+                            self._bowie_marks.pop(identity, None)
+                    if applied and swing.style == "katana" and swing.combo == 3 \
+                            and not getattr(enemy, "is_boss", False) \
+                            and getattr(enemy, "kind", "") != "boss" and hasattr(enemy, "vy"):
+                        enemy.vy = min(float(enemy.vy), -395.0)
+                    if applied and swing.style == "field_knife" and swing.combo == 3 \
+                            and getattr(enemy, "hp", 1) <= 0:
+                        # A clean execution lets the knife immediately move on.
+                        self.weapons["pencil_blade"].cooldown = min(
+                            self.weapons["pencil_blade"].cooldown, .055,
+                        )
+                    self.impact(rect.centerx, rect.centery, kind,
+                                20 if swing.combo == 3 else 12)
             if self.melee.finished:
                 self.melee = None
         self.player.combat_swing = (self.melee.pencil_pose()
@@ -882,12 +1102,15 @@ class WeaponSystem:
             tags = {damage_kind}
             if damage_kind == "eraser":
                 tags.update(("eraser", "heavy"))
-            elif damage_kind in ("marker", "pencil_finisher"):
+            elif damage_kind == "marker" or damage_kind.endswith("finisher") \
+                    or damage_kind == "katana_rise":
                 tags.add("heavy")
-            elif damage_kind == "rubber_band":
+            if damage_kind in ("rubber_band", "ion_wave"):
                 tags.add("pierce")
-            if damage_kind == "pencil_finisher":
+            if damage_kind.endswith("finisher") or damage_kind == "katana_rise":
                 tags.add("finisher")
+            if damage_kind.startswith(("katana_", "bowie_", "ion_edge", "field_", "redraw")):
+                tags.add("melee")
             if damage_kind == "excalibur":
                 tags.update(("heavy", "finisher", "heroic"))
             if attack_id:
@@ -946,7 +1169,8 @@ class WeaponSystem:
             enemy.hit_flash = max(float(getattr(enemy, "hit_flash", 0)), .15)
         enemy.last_weapon_hit = damage_kind
         hp = getattr(enemy, "hp", 1)
-        heavy = damage_kind in ("eraser", "marker", "pencil_finisher", "excalibur")
+        heavy = (damage_kind in ("eraser", "marker", "pencil_finisher", "excalibur",
+                                 "katana_rise") or damage_kind.endswith("finisher"))
         rect = _enemy_rect(enemy)
         if rect:
             _call(ctx, "particles", "combat_hit", rect.centerx, rect.centery,
@@ -1089,6 +1313,7 @@ class WeaponSystem:
         self.player.attack_serial = 0
         self.fire_buffer = 0
         self._boss_marker_volleys.clear()
+        self._bowie_marks.clear()
         for weapon in self.weapons.values():
             weapon.cooldown = 0
             weapon.reload_timer = 0
@@ -1144,21 +1369,65 @@ class WeaponSystem:
         layer.fill((0,0,0,0))
         facing = 1 if swing.direction.x >= 0 else -1
         turn = (-1 if swing.combo == 2 else 1)*facing
-        span = (.92 if swing.combo < 3 else 1.48)*fade
+        base_span = {
+            "katana": (.72 if swing.combo < 3 else 1.34),
+            "bowie": (.48 if swing.combo < 3 else .88),
+            "ion_blade": (1.06 if swing.combo < 3 else 1.62),
+            "field_knife": (.38 if swing.combo < 3 else .72),
+            "redraw_pencil": (.86 if swing.combo < 3 else 1.42),
+        }.get(swing.style, .92 if swing.combo < 3 else 1.48)
+        span = base_span*fade
         outer=[];inner=[]
+        stroke_width = {
+            "katana": 3 if swing.combo < 3 else 8,
+            "bowie": 7 if swing.combo < 3 else 10,
+            "ion_blade": 8 if swing.combo < 3 else 15,
+            "field_knife": 3 if swing.combo < 3 else 7,
+            "redraw_pencil": 5 if swing.combo < 3 else 10,
+        }.get(swing.style, 5 if swing.combo < 3 else 12)
         for i in range(15):
             t=i/14
             a=angle-turn*span*(1-t)
             radius=reach*(.83+.17*t)
-            width=(5 if swing.combo<3 else 12)*math.sin(t*math.pi)
+            width=stroke_width*math.sin(t*math.pi)
             outer.append((140+math.cos(a)*radius,140+math.sin(a)*radius))
             inner.append((140+math.cos(a)*(radius-width),140+math.sin(a)*(radius-width)))
-        color = (self.profile().accent if self.page_index == 2 or swing.combo == 3 else (65,63,61))
-        pygame.draw.polygon(layer,(*color,round(95*fade)),outer+list(reversed(inner)))
-        pygame.draw.lines(layer,(*color,round(215*fade)),False,outer,2 if swing.combo<3 else 3)
+        color = {
+            "katana": (151, 58, 57),
+            "bowie": (133, 83, 52),
+            "ion_blade": (63, 123, 151),
+            "field_knife": (64, 91, 79),
+            "redraw_pencil": ((165, 60, 63) if swing.echo_active else (62, 60, 59)),
+        }.get(swing.style, self.profile().accent if swing.combo == 3 else (65,63,61))
+        fill_alpha = 45 if swing.style in ("katana", "field_knife") else 105
+        pygame.draw.polygon(layer,(*color,round(fill_alpha*fade)),outer+list(reversed(inner)))
+        pygame.draw.lines(layer,(*color,round(225*fade)),False,outer,
+                          1 if swing.style == "field_knife" else 2 if swing.combo<3 else 3)
         for offset in (7,13):
             echo=[(140+(p[0]-140)*(1-offset/reach),140+(p[1]-140)*(1-offset/reach)) for p in outer[3:11]]
             pygame.draw.lines(layer,(*color,round(70*fade)),False,echo,1)
+        if swing.style == "ion_blade":
+            # Clean light core and parallel edge make the energy slash legible
+            # even before its third-hit projectile leaves the player.
+            pygame.draw.lines(layer,(224,239,235,round(205*fade)),False,outer[3:13],2)
+            pygame.draw.lines(layer,(91,150,171,round(105*fade)),False,inner[2:12],2)
+        elif swing.style == "field_knife":
+            # Short, separated speed ticks sell rapid stabbing motion.
+            for index in (2,6,10):
+                pygame.draw.line(layer,(*color,round(210*fade)),outer[index],inner[index],2)
+        elif swing.style == "bowie" and swing.combo == 3:
+            for index in range(3):
+                offset = pygame.Vector2(-4+index*4, 3+index*2)
+                pygame.draw.line(layer,(151,92,55,round(180*fade)),
+                                 pygame.Vector2(outer[4+index])+offset,
+                                 pygame.Vector2(outer[10+index])+offset,2)
+        elif swing.style == "redraw_pencil":
+            trace = [(x+5*facing,y+4) for x,y in outer[2:13]]
+            trace_color = (166,59,62) if swing.echo_active else (124,105,99)
+            pygame.draw.lines(layer,(*trace_color,round((235 if swing.echo_active else 85)*fade)),
+                              False,trace,2)
+        elif swing.style == "katana" and swing.combo == 2:
+            pygame.draw.line(layer,(50,49,49,round(170*fade)),outer[2],outer[-2],1)
         surface.blit(layer,(round(origin.x)-140,round(origin.y)-140))
 
     def draw_hud(self, surface, renderer, pos=(26, 604), controller=False):

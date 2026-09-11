@@ -284,7 +284,8 @@ class PaperStoryTests(unittest.TestCase):
             if arena:
                 if arena.enemies:
                     ranged_kinds = {"doodle_turret","redaction_agent","ink_outlaw",
-                                    "cactus_gunner","paper_wasp","origami_drone","star_scout"}
+                                    "cactus_gunner","rake_cactus","gutter_lantern",
+                                    "paper_wasp","origami_drone","star_scout"}
                     def target_priority(enemy):
                         distance = abs(enemy.x-player.center_x)
                         # A firing line is the first problem to solve while a
@@ -310,6 +311,8 @@ class PaperStoryTests(unittest.TestCase):
                         "tumbleweed_thing": "marker_shotgun", "star_scout": "rubber_band",
                         "moon_bot": "rubber_band", "lantern_yokai": "pencil_blade",
                         "cactus_gunner": "ink_pistol", "comet_hound": "rubber_band",
+                        "gutter_lantern": "ink_pistol", "rake_cactus": "ink_pistol",
+                        "ember_hound": "rubber_band",
                         "moon_compass": "pencil_blade", "wanted_sketch": "ink_pistol",
                         "railroad_stapler": "marker_shotgun",
                         "orbital_mistake": "eraser_cannon",
@@ -335,7 +338,8 @@ class PaperStoryTests(unittest.TestCase):
                                         "boss", "baby_face_giant", "final_editor")
                         else 135 if kind in ("paper_wasp", "doodle_turret", "spitter",
                                              "origami_drone", "ink_outlaw", "star_scout",
-                                             "moon_bot", "lantern_yokai", "cactus_gunner")
+                                             "moon_bot", "lantern_yokai", "cactus_gunner",
+                                             "gutter_lantern", "rake_cactus")
                         else 96 if kind in ("compass", "stapler", "failed_sketch",
                                             "moon_compass", "wanted_sketch",
                                             "railroad_stapler")
@@ -366,7 +370,7 @@ class PaperStoryTests(unittest.TestCase):
                         "stomp_warn", "sweep_warn",
                         "sheath", "snicker", "quickdraw", "rustle", "lock", "scan", "charge",
                         "flare", "prickle", "tail_warn", "ram_warn", "agent_aim", "cut_warn", "drop_warn",
-                        "bounty_draw", "rail_whistle", "staple_columns_warn",
+                        "bounty_draw", "rail_whistle", "return_whistle", "return_telegraph", "cross_warn", "staple_columns_warn",
                         "moon_release_warn", "meteor_warn",
                     }
                     ranged_windups = {"aim","scan","flare","quickdraw","lock","agent_aim","bounty_draw"}
@@ -450,11 +454,11 @@ class PaperStoryTests(unittest.TestCase):
                     not arena.enemies or bool(incoming) or
                     (preferred in ("pencil_blade","excalibur") and
                      target.rect.bottom<player.rect.bottom-40) or
-                    any(e.state == "shear" and abs(e.x-player.center_x)<300 for e in arena.enemies) or
+                    any(e.state in ("shear", "rail_rush") and abs(e.x-player.center_x)<300 for e in arena.enemies) or
                     any(e.state == "cut_warn" and e.state_time < .22 and
                         abs(e.x-player.center_x)<180 for e in arena.enemies) or
-                    any(e.state == "rail_whistle" and e.state_time < .22 for e in arena.enemies) or
-                    any(enemy.state in ("telegraph", "slam_telegraph", "sweep_telegraph")
+                    any(e.state in ("rail_whistle", "return_whistle") and e.state_time < .22 for e in arena.enemies) or
+                    any(enemy.state in ("telegraph", "slam_telegraph", "sweep_telegraph", "return_telegraph")
                         or (enemy.kind == "eraser_brute" and
                             (enemy.state in ("slam", "recover")
                              or bool(getattr(enemy, "_temporary_erases", ()))))

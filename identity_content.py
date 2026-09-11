@@ -62,7 +62,9 @@ CURATED_SPECS = {
     ],
     "bamboo_static": [
         {"wave": 0, "kind": "ink_samurai", "offset": 330},
-        {"wave": 0, "kind": "lantern_yokai", "offset": 760},
+        # The narrow veteran freezes a violet rain column. Pair it only with
+        # one melee threat so MOVE reads differently from the base fan.
+        {"wave": 0, "kind": "gutter_lantern", "offset": 760},
         {"wave": 1, "kind": "origami_drone", "offset": 270},
         {"wave": 1, "kind": "goblin_scribble", "offset": 565},
         {"wave": 1, "kind": "ruler_guard", "offset": 850},
@@ -82,7 +84,7 @@ CURATED_SPECS = {
         {"wave": 0, "kind": "ink_outlaw", "offset": 230},
         {"wave": 0, "kind": "paper_wasp", "offset": 690},
         {"wave": 1, "kind": "tumbleweed_thing", "offset": 260},
-        {"wave": 1, "kind": "cactus_gunner", "offset": 520},
+        {"wave": 1, "kind": "rake_cactus", "offset": 520},
         {"wave": 1, "kind": "goblin_scribble", "offset": 810},
     ],
     "marker_margin_trial": [
@@ -105,7 +107,7 @@ CURATED_SPECS = {
     "orbital_debris": [
         {"wave": 0, "kind": "origami_drone", "offset": 260},
         {"wave": 0, "kind": "star_scout", "offset": 750},
-        {"wave": 1, "kind": "comet_hound", "offset": 240},
+        {"wave": 1, "kind": "ember_hound", "offset": 240},
         {"wave": 1, "kind": "moon_bot", "offset": 555},
         {"wave": 1, "kind": "doodle_turret", "offset": 870},
     ],

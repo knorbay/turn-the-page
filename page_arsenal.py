@@ -51,11 +51,11 @@ ORIGINAL = {
 
 PAGE_TOOLS = {
     0: {
-        "pencil_blade": ToolProfile("INK KATANA", "katana", "draw · return · rising cut",
+        "pencil_blade": ToolProfile("INK KATANA", "katana", "draw dash · return step · rising launch",
                                    fire_delay=.32, reach_scale=1.18, tempo=1.0, accent=(155, 56, 54)),
     },
     1: {
-        "pencil_blade": ToolProfile("BOWIE KNIFE", "bowie", "close in · three-cut finish",
+        "pencil_blade": ToolProfile("BOWIE KNIFE", "bowie", "stay close · mark twice · cash out",
                                    fire_delay=.27, reach_scale=.88, tempo=.88, damage=1.0, accent=(142, 91, 57)),
         "ink_pistol": ToolProfile("SIX-SHOOTER", "revolver", "six heavy shots · deliberate rhythm",
                                  6, 1.56, .42, 820, 0, 1.20, lifetime=1.15, knockback=145, recoil=18),
@@ -64,7 +64,7 @@ PAGE_TOOLS = {
                                      knockback=190, recoil=150, accent=(142, 91, 57)),
     },
     2: {
-        "pencil_blade": ToolProfile("ION EDGE", "ion_blade", "weightless cuts · wide finish",
+        "pencil_blade": ToolProfile("ION EDGE", "ion_blade", "third cut fires a piercing wave",
                                    fire_delay=.31, reach_scale=1.22, tempo=.96, accent=(63, 111, 139)),
         "rubber_band": ToolProfile("ORBIT PULSE", "pulse", "three ricochets · bank off ink",
                                    fire_delay=.64, speed=720, gravity=0, damage=.9, lifetime=2.7,
@@ -74,8 +74,8 @@ PAGE_TOOLS = {
                                      recoil=120, pierce=2, erase_radius=31, accent=(63, 111, 139)),
     },
     3: {
-        "pencil_blade": ToolProfile("FIELD KNIFE", "field_knife", "quick cuts · short reach",
-                                   fire_delay=.25, reach_scale=.82, tempo=.80, damage=.95,
+        "pencil_blade": ToolProfile("FIELD KNIFE", "field_knife", "rapid chain · execute wounded targets",
+                                   fire_delay=.18, reach_scale=.82, tempo=.80, damage=.95,
                                    accent=(76, 104, 92)),
         "ink_pistol": ToolProfile("SUPPRESSED PISTOL", "suppressed", "quick, precise fire · light recoil",
                                  9, 1.12, .24, 960, 0, .95, lifetime=.95, knockback=75,
@@ -84,7 +84,12 @@ PAGE_TOOLS = {
                                      3, 1.85, .90, 720, 25, .85, spread=13, pellets=5, lifetime=.49,
                                      knockback=175, recoil=85, accent=(76, 104, 92)),
     },
-    4: {},
+    4: {
+        "pencil_blade": ToolProfile("REDRAW PENCIL", "redraw_pencil",
+                                   "every stroke returns as a delayed trace",
+                                   fire_delay=.34, reach_scale=1.04, tempo=.94,
+                                   damage=.90, accent=(165, 60, 63)),
+    },
 }
 
 
@@ -127,13 +132,22 @@ def draw_weapon(surface, weapon_id, page_index, grip, angle=0.0, scale=1.0, ink=
         pygame.draw.circle(surface, color, pt(x,y), max(1,round(radius*scale)),
                            min(max(1,round(radius*scale)), max(1,round(width*scale))) if width else 0)
 
-    if shape in ("katana", "bowie", "field_knife", "ion_blade", "pencil", "excalibur"):
-        length = {"katana":47,"bowie":27,"field_knife":24,"ion_blade":43,"pencil":40,"excalibur":67}[shape]
-        if shape == "pencil":
+    if shape in ("katana", "bowie", "field_knife", "ion_blade", "pencil",
+                 "redraw_pencil", "excalibur"):
+        length = {"katana":47,"bowie":27,"field_knife":24,"ion_blade":43,
+                  "pencil":40,"redraw_pencil":44,"excalibur":67}[shape]
+        if shape in ("pencil", "redraw_pencil"):
             poly([(-12,-3),(length-8,-3),(length,0),(length-8,3),(-12,3)], (204,174,93))
             line([(-8,0),(length-8,0)], light, 1)
             poly([(length-8,-3),(length,0),(length-8,3)], dark)
             poly([(-12,-3),(-8,-3),(-8,3),(-12,3)], (185,130,116))
+            if shape == "redraw_pencil":
+                # The final-page tool is visibly corrected over the original:
+                # a red second lead and registration ticks preview its echo hit.
+                line([(-7,2),(length-8,2)], accent, 2)
+                poly([(length-8,0),(length,2),(length-8,4)], accent, accent)
+                for x in (5,17,29):
+                    line([(x,-5),(x,-2)], accent, 1)
         else:
             poly([(-12,-3),(3,-3),(3,3),(-12,3)], dark, dark)
             for x in (-9,-5,-1):
@@ -234,6 +248,6 @@ def draw_weapon_icon(surface, weapon_id, page_index, center, size=42):
     shape = profile.silhouette
     extent = 80 if shape=="excalibur" else 62 if shape in ("katana","double_barrel","breach","marker") else 56
     scale = size / extent
-    offset_x = 16 if shape in ("katana","pencil","ion_blade","excalibur") else 6
+    offset_x = 16 if shape in ("katana","pencil","redraw_pencil","ion_blade","excalibur") else 6
     offset_y = 0 if weapon_id in ("pencil_blade","excalibur","rubber_band") else -3
     draw_weapon(surface,weapon_id,page_index,(center[0]-offset_x*scale,center[1]-offset_y*scale),scale=scale)

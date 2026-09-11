@@ -482,7 +482,7 @@ class Player:
             page = getattr(self, "arsenal_page", None)
             shape = profile_for(page, "pencil_blade").silhouette
             length = {"katana":47, "bowie":27, "field_knife":24,
-                      "ion_blade":43, "pencil":40}.get(shape, 40)
+                      "ion_blade":43, "pencil":40, "redraw_pencil":44}.get(shape, 40)
             draw_weapon(surface, "pencil_blade", page, hand, angle,
                         scale=max(.55, (reach - 13) / length), ink=ink)
             pygame.draw.circle(surface,ink,hand,3,1)
@@ -506,8 +506,18 @@ class Player:
             page = getattr(self, "arsenal_page", None)
             held_angle = self.aim_angle - direction * recoil * .12
             if weapon == "pencil_blade":
-                # Blades are carried low, then the real swing pose takes over.
-                held_angle = .60 if direction > 0 else math.pi - .60
+                # The idle pose previews each starter's handling before the
+                # first hit: sheathed katana, close Bowie, floating ion edge,
+                # reverse-grip field knife, and the final page's writing grip.
+                shape = profile_for(page, weapon).silhouette
+                carry = {
+                    "katana": .28,
+                    "bowie": -.22,
+                    "ion_blade": .04,
+                    "field_knife": 1.02,
+                    "redraw_pencil": .70,
+                }.get(shape, .60)
+                held_angle = carry if direction > 0 else math.pi - carry
             draw_weapon(surface, weapon, page, (hand_x, hand_y), held_angle, ink=ink)
             return
         muzzle_x = hand_x + direction * 30

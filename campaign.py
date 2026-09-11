@@ -14,28 +14,28 @@ NEW_ROOMS={
  3: (
   ('agent_checkpoint',1100,2120,('redaction_agent','ink_clone'),('redaction_agent','paper_wasp','ink_clone')),
   ('carbon_crossfire',3000,4200,('redaction_agent','ruler_guard'),('doodle_turret','redaction_agent','comet_hound')),
-  ('redacted_rooftops',5000,6200,('paper_wasp','redaction_agent'),('ink_clone','eraser_brute','redaction_agent')),
+  ('redacted_rooftops',5000,6200,('gutter_lantern','redaction_agent'),('ink_clone','eraser_brute','redaction_agent')),
   ('office_ambush',7000,8240,('redaction_agent','crumpled_one','ink_clone'),('paper_wasp','doodle_turret','redaction_agent')),
   ('scissor_office',9000,10320,('redaction_agent','ink_clone'),('scissor_director',)),
  ),
  4: (
   ('last_lesson',900,2040,('ink_samurai','redaction_agent'),('lantern_yokai','comet_hound','ruler_guard')),
   ('erased_answers',2800,4020,('eraser_brute','doodle_turret'),('moon_bot','redaction_agent','ink_clone')),
-  ('margin_revolt',4800,6040,('cactus_gunner','goblin_scribble','origami_drone'),('redaction_agent','comet_hound','ruler_guard')),
-  ('the_last_crossout',6900,8140,('ink_clone','redaction_agent','moon_bot'),('eraser_brute','paper_wasp','ink_samurai')),
+  ('margin_revolt',4800,6040,('rake_cactus','goblin_scribble','origami_drone'),('redaction_agent','comet_hound','ruler_guard')),
+  ('the_last_crossout',6900,8140,('ink_clone','redaction_agent','moon_bot'),('eraser_brute','ember_hound','ink_samurai')),
   ('final_margin_revision',9000,10520,('final_editor',)),
  )
 }
 ROOM_BRIEFS={
  'agent_checkpoint':('01 / FALSE ID','The agent commits to three shots. Then reloads.'),
  'carbon_crossfire':('02 / CARBON CROSSFIRE','Climb the ink line; drop behind the shield.'),
- 'redacted_rooftops':('03 / ROOFTOP REVISION','Air and ground threats. Keep a landing line.'),
+ 'redacted_rooftops':('03 / ROOFTOP REVISION','Leave the violet column before the ink falls.'),
  'office_ambush':('04 / THE OFFICE BITES','Deal with the turret before the next copy.'),
  'scissor_office':('THE HEAD OF REDACTION','Jump the low cut. Leave the X. Hit the open hinge.'),
  'last_lesson':('01 / WRONG CLASS','Five pages of enemies. One small stick figure.'),
  'erased_answers':('02 / ERASED ANSWERS','A platform can save you. Watch the eraser.'),
- 'margin_revolt':('03 / MARGIN REVOLT','Break the ranged line before chasing the hound.'),
- 'the_last_crossout':('04 / THE LAST CROSSOUT','Every enemy has a pause. Find yours.'),
+ 'margin_revolt':('03 / MARGIN REVOLT','Jump the gold rake, then break the ranged line.'),
+ 'the_last_crossout':('04 / THE LAST CROSSOUT','The blue trail stays hot. Cross it in the air.'),
  'final_margin_revision':('THE FINAL EDITOR','Read the proof. Attack when the binder opens.'),
 }
 

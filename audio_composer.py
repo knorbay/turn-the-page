@@ -23,7 +23,41 @@ SFX_NAMES = (
     "arena_lock", "arena_clear", "boss_reveal", "heart",
     "katana_draw", "katana_cut", "staple", "snip", "ink_burst",
     "compass_sweep", "stamp",
+    # Page-specific player tools. Runtime redirects the legacy weapon cue to
+    # one of these without requiring callers to know which page is active.
+    "bowie_cut", "ion_slice", "field_knife", "revolver",
+    "suppressed_shot", "double_barrel", "breach_shotgun",
+    "null_cannon", "orbit_pulse",
+    # Semantic combat cues are intentionally broader than an enemy class.
+    # New actors can ask for a material and role while old calls keep working.
+    "enemy_telegraph", "enemy_telegraph_ranged",
+    "enemy_telegraph_heavy", "enemy_telegraph_air",
+    "enemy_attack_melee", "enemy_attack_ranged", "enemy_attack_charge",
+    "enemy_hit_paper", "enemy_hit_ink", "enemy_hit_metal",
+    "enemy_death_paper", "enemy_death_ink", "enemy_death_metal",
+    "boss_phase_shift", "boss_opening", "boss_signature",
 )
+
+# Repeated combat cues receive deterministic alternate renders. The first
+# render remains the canonical ``sfx_<name>.wav`` for compatibility; further
+# takes are written as ``_v2``, ``_v3`` and so on by the asset builder.
+SFX_VARIANT_COUNTS = {
+    "blade": 3, "katana_cut": 3, "pistol": 4, "shotgun": 3,
+    "cannon": 3, "rubber": 3, "hit": 4, "heavy_hit": 3,
+    "enemy_break": 4, "blocked": 3, "ink": 3, "paper_step": 3,
+    "staple": 3, "snip": 3, "ink_burst": 3,
+    "bowie_cut": 3, "ion_slice": 3, "field_knife": 3,
+    "revolver": 4, "suppressed_shot": 4, "double_barrel": 3,
+    "breach_shotgun": 3, "null_cannon": 3, "orbit_pulse": 3,
+    "enemy_telegraph": 3, "enemy_telegraph_ranged": 3,
+    "enemy_telegraph_heavy": 3, "enemy_telegraph_air": 3,
+    "enemy_attack_melee": 3, "enemy_attack_ranged": 3,
+    "enemy_attack_charge": 3, "enemy_hit_paper": 4,
+    "enemy_hit_ink": 4, "enemy_hit_metal": 4,
+    "enemy_death_paper": 3, "enemy_death_ink": 3,
+    "enemy_death_metal": 3, "boss_phase_shift": 3,
+    "boss_opening": 3, "boss_signature": 3,
+}
 
 
 def _clip(value: float) -> float:
@@ -166,6 +200,26 @@ class NotebookComposer:
         self._add_note(target, start, duration, frequency, gain, "bass")
         self._add_noise(target, start, min(.12, duration), gain * .42,
                         seed, "tear")
+
+    def _add_chirp(self, target: list[float], start: float, duration: float,
+                   start_frequency: float, end_frequency: float,
+                   gain: float, seed: int = 1) -> None:
+        """Add a short pitched gesture with a paper-soft attack and tail."""
+        begin = max(0, round(start * self.sample_rate))
+        count = max(1, round(duration * self.sample_rate))
+        end = min(len(target), begin + count)
+        rng = random.Random(seed)
+        phase = 0.0
+        for index in range(begin, end):
+            age = (index - begin) / self.sample_rate
+            progress = age / max(.001, duration)
+            frequency = start_frequency + (end_frequency - start_frequency) * progress
+            phase += TAU * frequency / self.sample_rate
+            edge = math.sin(math.pi * min(1.0, progress)) ** .62
+            flutter = 1.0 + rng.uniform(-.012, .012)
+            target[index] += (
+                math.sin(phase) * .72 + math.sin(phase * 2.01) * .18
+            ) * edge * gain * flutter
 
     def ambience(self, page: int, duration: float | None = None) -> array:
         page = max(0, min(4, int(page)))
@@ -360,7 +414,13 @@ class NotebookComposer:
                                self.midi(root + 12 + interval), .055 * energy, "ink")
         return _pcm(target)
 
-    def sfx(self, name: str) -> array:
+    def sfx(self, name: str, variation: int = 0) -> array:
+        """Render one deterministic take of a cue.
+
+        ``variation=0`` preserves the original canonical render. Alternate
+        takes change oscillator pitch, material noise and tiny layer timings;
+        they never depend on global random state.
+        """
         specs = {
             "pencil": (.24, "scratch", 930),
             "erase": (.34, "rub", 290),
@@ -401,10 +461,39 @@ class NotebookComposer:
             "ink_burst": (.27, "ink_burst", 160),
             "compass_sweep": (.63, "compass_sweep", 790),
             "stamp": (.29, "stamp", 84),
+            "bowie_cut": (.24, "bowie_cut", 680),
+            "ion_slice": (.31, "ion_slice", 420),
+            "field_knife": (.18, "field_knife", 760),
+            "revolver": (.19, "revolver", 118),
+            "suppressed_shot": (.14, "suppressed_shot", 155),
+            "double_barrel": (.34, "double_barrel", 76),
+            "breach_shotgun": (.27, "breach_shotgun", 96),
+            "null_cannon": (.46, "null_cannon", 52),
+            "orbit_pulse": (.32, "orbit_pulse", 510),
+            "enemy_telegraph": (.25, "enemy_telegraph", 780),
+            "enemy_telegraph_ranged": (.37, "enemy_telegraph_ranged", 410),
+            "enemy_telegraph_heavy": (.51, "enemy_telegraph_heavy", 66),
+            "enemy_telegraph_air": (.42, "enemy_telegraph_air", 930),
+            "enemy_attack_melee": (.22, "enemy_attack_melee", 610),
+            "enemy_attack_ranged": (.25, "enemy_attack_ranged", 205),
+            "enemy_attack_charge": (.39, "enemy_attack_charge", 74),
+            "enemy_hit_paper": (.16, "enemy_hit_paper", 180),
+            "enemy_hit_ink": (.16, "enemy_hit_ink", 235),
+            "enemy_hit_metal": (.18, "enemy_hit_metal", 720),
+            "enemy_death_paper": (.39, "enemy_death_paper", 112),
+            "enemy_death_ink": (.44, "enemy_death_ink", 94),
+            "enemy_death_metal": (.48, "enemy_death_metal", 145),
+            "boss_phase_shift": (.86, "boss_phase_shift", 58),
+            "boss_opening": (.54, "boss_opening", 118),
+            "boss_signature": (.72, "boss_signature", 46),
         }
         duration, kind, frequency = specs.get(name, (.16, "hit", 330))
         target = self.silence(duration)
-        seed = sum((index + 1) * ord(char) for index, char in enumerate(name))
+        variation = max(0, int(variation))
+        seed = (sum((index + 1) * ord(char) for index, char in enumerate(name))
+                + variation * 7919)
+        if variation:
+            frequency *= (1.0, .955, 1.038, .982)[variation % 4]
         if kind in ("scratch", "pencil"):
             self._add_noise(target, 0, duration, .25, seed, "scratch")
             self._add_note(target, .01, min(.13, duration), frequency, .07, "pencil")
@@ -509,6 +598,124 @@ class NotebookComposer:
             self._add_impact(target, .012, frequency, .45, .17, seed)
             self._add_noise(target, 0, .07, .29, seed + 1, "paper")
             self._add_noise(target, .11, .13, .12, seed + 2, "rub")
+        elif kind == "bowie_cut":
+            self._add_noise(target, 0, .17, .31, seed, "tear")
+            self._add_impact(target, .035, frequency * .42, .17, .07, seed + 1)
+            self._add_note(target, .052, .16, frequency * 1.9, .055, "toy")
+        elif kind == "ion_slice":
+            self._add_chirp(target, 0, .22, frequency * .72,
+                            frequency * 2.25, .20, seed)
+            self._add_noise(target, .035, .17, .13, seed + 1, "paper")
+            self._add_note(target, .105, .18, frequency * 2.62, .055, "air")
+        elif kind == "field_knife":
+            self._add_noise(target, 0, .12, .27, seed, "scratch")
+            self._add_impact(target, .062, frequency * .31, .17, .065, seed + 1)
+        elif kind == "revolver":
+            self._add_impact(target, 0, frequency, .42, .16, seed)
+            self._add_noise(target, 0, .045, .34, seed + 1, "tear")
+            self._add_note(target, .018, .16, 1280 * frequency / 118, .07, "toy")
+            self._add_impact(target, .102, frequency * 1.7, .09, .05, seed + 2)
+        elif kind == "suppressed_shot":
+            self._add_impact(target, 0, frequency, .19, .095, seed)
+            self._add_noise(target, 0, .065, .15, seed + 1, "rub")
+            self._add_note(target, .012, .09, frequency * 5.4, .045, "pencil")
+        elif kind == "double_barrel":
+            self._add_impact(target, 0, frequency, .47, .28, seed)
+            self._add_noise(target, 0, .16, .31, seed + 1, "tear")
+            self._add_impact(target, .035, frequency * .83, .28, .24, seed + 2)
+            self._add_noise(target, .17, .14, .12, seed + 3, "paper")
+        elif kind == "breach_shotgun":
+            self._add_impact(target, 0, frequency, .40, .21, seed)
+            self._add_noise(target, .004, .085, .25, seed + 1, "tear")
+            self._add_note(target, .024, .17, frequency * 6.1, .045, "toy")
+        elif kind == "null_cannon":
+            self._add_chirp(target, 0, .36, frequency * 2.4,
+                            frequency * .68, .30, seed)
+            self._add_noise(target, .025, .38, .22, seed + 1, "rub")
+            self._add_impact(target, .06, frequency, .31, .33, seed + 2)
+        elif kind == "orbit_pulse":
+            self._add_note(target, 0, .24, frequency, .16, "toy")
+            self._add_note(target, .038, .25, frequency * 1.5, .12, "ink")
+            self._add_chirp(target, .08, .18, frequency * .7,
+                            frequency * 1.18, .09, seed)
+        elif kind == "enemy_telegraph":
+            for index, ratio in enumerate((1.0, 1.18, 1.42)):
+                self._add_note(target, index * .057, .16, frequency * ratio,
+                               .09, "pencil")
+            self._add_noise(target, 0, .21, .08, seed, "scratch")
+        elif kind == "enemy_telegraph_ranged":
+            self._add_chirp(target, 0, .28, frequency * .72,
+                            frequency * 1.38, .16, seed)
+            self._add_noise(target, .045, .24, .12, seed + 1, "rub")
+            self._add_note(target, .19, .14, frequency * 1.8, .07, "ink")
+        elif kind == "enemy_telegraph_heavy":
+            self._add_impact(target, 0, frequency, .25, .31, seed)
+            self._add_impact(target, .21, frequency * .82, .18, .24, seed + 1)
+            self._add_noise(target, .06, .39, .13, seed + 2, "scratch")
+        elif kind == "enemy_telegraph_air":
+            self._add_noise(target, 0, .33, .22, seed, "paper")
+            self._add_chirp(target, .04, .31, frequency * .78,
+                            frequency * 1.31, .075, seed + 1)
+        elif kind == "enemy_attack_melee":
+            self._add_noise(target, 0, .16, .33, seed, "tear")
+            self._add_impact(target, .08, frequency * .27, .18, .12, seed + 1)
+        elif kind == "enemy_attack_ranged":
+            self._add_note(target, 0, .19, frequency, .18, "ink")
+            self._add_noise(target, .012, .13, .18, seed, "rub")
+            self._add_impact(target, .025, frequency * .55, .10, .08, seed + 1)
+        elif kind == "enemy_attack_charge":
+            self._add_chirp(target, 0, .31, frequency * 1.35,
+                            frequency * .63, .14, seed)
+            self._add_noise(target, .02, .34, .24, seed + 1, "tear")
+            self._add_impact(target, .22, frequency, .24, .16, seed + 2)
+        elif kind == "enemy_hit_paper":
+            self._add_noise(target, 0, .13, .30, seed, "paper")
+            self._add_impact(target, .018, frequency, .19, .10, seed + 1)
+        elif kind == "enemy_hit_ink":
+            self._add_note(target, 0, .14, frequency, .19, "ink")
+            self._add_noise(target, .01, .12, .19, seed, "rub")
+            self._add_impact(target, .035, frequency * .52, .12, .09, seed + 1)
+        elif kind == "enemy_hit_metal":
+            self._add_impact(target, 0, frequency * .32, .20, .11, seed)
+            self._add_note(target, .012, .16, frequency, .13, "toy")
+            self._add_note(target, .018, .14, frequency * 1.57, .06, "toy")
+        elif kind == "enemy_death_paper":
+            self._add_noise(target, 0, .34, .36, seed, "tear")
+            self._add_impact(target, .13, frequency, .21, .20, seed + 1)
+            self._add_noise(target, .24, .12, .10, seed + 2, "paper")
+        elif kind == "enemy_death_ink":
+            for index in range(3):
+                at = index * .055
+                self._add_note(target, at, .22, frequency * (1 - index * .16),
+                               .18, "ink")
+                self._add_noise(target, at, .15, .14, seed + index, "rub")
+            self._add_impact(target, .20, frequency * .52, .15, .18, seed + 4)
+        elif kind == "enemy_death_metal":
+            self._add_impact(target, 0, frequency, .31, .24, seed)
+            for index, ratio in enumerate((3.8, 5.1, 6.7)):
+                self._add_note(target, .035 + index * .046, .33,
+                               frequency * ratio, .075 / (1 + index * .2), "toy")
+            self._add_noise(target, .20, .22, .11, seed + 3, "paper")
+        elif kind == "boss_phase_shift":
+            self._add_impact(target, 0, frequency, .38, .61, seed)
+            self._add_chirp(target, .06, .56, frequency * 1.7,
+                            frequency * 5.2, .13, seed + 1)
+            for index, ratio in enumerate((1.0, 1.5, 2.0)):
+                self._add_note(target, .24 + index * .095, .42,
+                               frequency * ratio, .10, "ink")
+            self._add_noise(target, .08, .66, .14, seed + 4, "tear")
+        elif kind == "boss_opening":
+            self._add_impact(target, 0, frequency, .28, .36, seed)
+            self._add_noise(target, .035, .42, .18, seed + 1, "paper")
+            for index, ratio in enumerate((3.0, 4.0, 5.5)):
+                self._add_note(target, .10 + index * .06, .31,
+                               frequency * ratio, .075, "toy")
+        elif kind == "boss_signature":
+            self._add_impact(target, 0, frequency, .42, .58, seed)
+            self._add_noise(target, .025, .54, .23, seed + 1, "tear")
+            self._add_chirp(target, .08, .48, frequency * 2.1,
+                            frequency * .92, .14, seed + 2)
+            self._add_note(target, .31, .35, frequency * 4.0, .09, "ink")
         else:
             self._add_impact(target, 0, frequency, .25, duration, seed)
         return _pcm(target)

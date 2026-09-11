@@ -2,11 +2,15 @@
 
 A hand-drawn notebook action game in which an Artist outside the page can redraw the player, lend tools, revise the arena, and react to how you fight.
 
-This build contains five playable pages, 23 required encounters, 17 ordinary enemy types, six named bosses, a separate three-attempt Baby-Face interlude, and four behavior-selected final configurations. The 97 authored enemy spawns include the bosses and interlude. Main-route length is 62,350 world units.
+This build contains five playable pages, 23 required encounters, 20 ordinary enemy types, six named bosses, a separate three-attempt Baby-Face interlude, and four behavior-selected final configurations. The 97 authored enemy spawns include the bosses and interlude. Main-route length is 62,350 world units.
 
 TURN THE PAGE ties combat tools to each page: a katana for the Ronin, a Bowie knife, six-shooter and double barrel in the West, energy tools in orbit, and a field knife, suppressed pistol and breach shotgun for the Agent. Their reach, rhythm, recoil, reloads, grouping and projectile behavior differ. The inventory grows only as drawings are collected. The same silhouette appears in the pickup, the character's hands and the inventory.
 
 Twelve Lost Sketches now teach persistent, optional techniques. Twenty handwritten school notes and all in-game text are in English. The two-burst school bell, quiet classroom babble, distinct boss rules and Baby-Face reversal remain part of the game.
+
+The latest combat pass adds three readable enemy variants: Gutter Lantern locks a falling ink column, Rake Cactus fires three ankle-height shots, and Ember Hound leaves a short-lived spark trail. Starting melee tools now have unique actions: katana launcher, same-target Bowie combo, piercing Ion Edge wave, wounded-target Field Knife execution, and a delayed redraw stroke.
+
+All six named bosses now escalate through distinct performances: returning compass arc, four-poster crossfire, express train return pass, expanding moon constellations and impact shards, scissors with real temporary floor cuts and marked X attacks, and the Final Editor's clean-margin redaction. Baby-Face keeps its signature sequence. Weapon sounds use page-specific cues, subtle variations and short mix ducking; enemy warnings and boss openings have dedicated cues.
 
 ## Run
 
@@ -84,7 +88,7 @@ python3 -m unittest discover -s tests -q
 python3 tools/render_beta_review.py
 ```
 
-115 tests pass, including an informed new-game-to-ending pilot through all five pages with only the two scripted Baby-Face defeats. This is automated progression verification; human completion time and first-play difficulty require playtesting.
+138 tests pass, including an informed new-game-to-ending pilot through all five pages with only the two scripted Baby-Face defeats. This is automated progression verification; human completion time and first-play difficulty require playtesting.
 
 Additional checks cover physical platforms, checkpoints, projectile returns, actual stagger, all four final layouts, save migration, shootable decoys, train rear vulnerability, orbital armour and protected audio channels. The Final Editor now locks and draws its aim before firing and converts leftover projectiles to harmless graphite when its clip opens. All six direct boss practice entries were opened and rendered using the runtime.
 

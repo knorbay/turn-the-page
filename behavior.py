@@ -179,6 +179,16 @@ class BehaviorLedger:
         elif cause in ("ink_hazard", "ink_wall"):
             candidates = ["Still wet.", "That stain is not a doorway.",
                           "I wrote CAREFUL quite clearly."]
+        elif cause == "gutter_lantern":
+            candidates = ["The violet line picked a place, not a person.",
+                          "Step out before the drops arrive.",
+                          "It cannot move that column once it marks it."]
+        elif cause == "rake_cactus":
+            candidates = ["Gold arrows mean up.", "Jump the ankle line.",
+                          "Three needles. One clean leap."]
+        elif cause == "ember_hound":
+            candidates = ["The blue stars stay hot.", "Do not chase through its trail.",
+                          "Over the sparks, then turn on it."]
         elif "boss" in arena or cause in (
             "artist_mistake", "failed_sketch", "moon_compass",
             "wanted_sketch", "railroad_stapler", "orbital_mistake",
