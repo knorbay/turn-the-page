@@ -156,7 +156,7 @@ class FivePageBetaContracts(unittest.TestCase):
    for _ in range(10):agent.update(.016,ctx,(0,1000))
    self.assertGreater(len(agent.projectiles),0)
 
- def test_three_agents_cannot_start_three_simultaneous_bursts(self):
+ def test_three_agents_space_their_first_warning(self):
   from campaign_enemies import RedactionAgent
   with tempfile.TemporaryDirectory() as d:
    game=Game(self.screen,Path(d)/'save.json')
@@ -167,5 +167,5 @@ class FivePageBetaContracts(unittest.TestCase):
    arena.enemies=[RedactionAgent(650+i*100) for i in range(3)]
    for enemy in arena.enemies:enemy.state_time=0
    arena.update(.016,ctx)
-   self.assertEqual(sum(e.state=='agent_aim' for e in arena.enemies),2)
-   self.assertEqual(sum(e.state=='idle' for e in arena.enemies),1)
+   self.assertEqual(sum(e.state=='agent_aim' for e in arena.enemies),1)
+   self.assertEqual(sum(e.state=='idle' for e in arena.enemies),2)

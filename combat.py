@@ -22,6 +22,41 @@ except ImportError:
 
 LEGACY_ENEMY_TYPES = {"crawler", "hopper", "spitter", "boss"}
 
+# These are lanes the player answers, not difficulty tiers. Two attackers may
+# overlap only when their warnings ask for different, compatible responses.
+ENCOUNTER_ROLES = {
+    "crawler": "close", "ruler_guard": "close", "ink_samurai": "close",
+    "ink_clone": "close", "crumpled_one": "close",
+    "tumbleweed_thing": "close", "comet_hound": "close",
+    "hopper": "air", "paper_wasp": "air", "goblin_scribble": "air",
+    "gutter_lantern": "air",
+    "spitter": "ranged", "doodle_turret": "ranged",
+    "origami_drone": "ranged", "ink_outlaw": "ranged",
+    "star_scout": "ranged", "lantern_yokai": "ranged",
+    "redaction_agent": "ranged",
+    "eraser_brute": "area", "moon_bot": "area",
+    "rake_cactus": "area", "cactus_gunner": "area", "ember_hound": "area",
+}
+ATTACK_WARNINGS = frozenset({
+    "telegraph", "brace", "echo_telegraph", "charge_telegraph",
+    "dive_telegraph", "slam_telegraph", "stomp_warn", "sweep_warn",
+    "snap_telegraph", "aim", "sheath", "snicker", "quickdraw", "rustle",
+    "lock", "scan", "flare", "prickle", "tail_warn", "ram_warn",
+    "agent_aim", "drop_warn", "boss_telegraph", "pattern_telegraph",
+    "sweep_telegraph", "bounty_draw", "rail_whistle", "staple_columns_warn",
+    "moon_release_warn", "meteor_warn", "return_whistle", "return_telegraph",
+    "cross_warn", "cut_warn", "page_slap_warn",
+})
+ATTACK_COMMITMENTS = frozenset({
+    "lunge", "thrust", "charge", "dive", "slam", "stomp", "sweep", "snap",
+    "burst", "crossout", "erase_slam", "mirror_storm", "boss_attack",
+    "draw_cut", "pounce", "roll", "ram", "comet_dash", "counter_cut",
+    "red_stamp", "proof_volley", "margin_burst", "agent_burst", "shear",
+    "drop", "echo_slash", "bounty_volley", "rail_rush", "staple_columns",
+    "moon_release", "meteor_fall", "return_sweep", "cross_cut",
+    "redaction_wall", "ink_rain", "page_slap",
+})
+
 
 def _ballistic_velocity(origin_x, origin_y, target_x, target_y, gravity,
                         travel_speed=390.0):
@@ -236,11 +271,16 @@ class DoodleEnemy:
             return True
         return True
 
+    def _start_telegraph(self, duration):
+        admit = getattr(self, "attack_admission", None)
+        if admit is None or admit(self, "telegraph"):
+            self.state, self.state_time = "telegraph", duration
+
     def _crawler(self, dt, distance):
         if self.state == "idle":
             self.vx += self.facing * 900 * dt
-            if abs(distance) < 92:
-                self.state, self.state_time = "telegraph", .38
+            if abs(distance) < 92 and self.state_time <= 0:
+                self._start_telegraph(.38)
         elif self.state == "telegraph":
             self.vx *= .65
             if self.state_time <= 0:
@@ -252,7 +292,7 @@ class DoodleEnemy:
     def _hopper(self, dt, distance):
         if self.state == "idle" and self.y >= self.ground_y:
             if self.state_time <= 0:
-                self.state, self.state_time = "telegraph", .42
+                self._start_telegraph(.42)
         elif self.state == "telegraph" and self.state_time <= 0:
             self.state, self.state_time = "drop", .75
             self.vy = -470
@@ -268,7 +308,7 @@ class DoodleEnemy:
         elif abs(distance) > 330:
             self.vx += self.facing * 860 * dt
         if self.state == "idle" and self.state_time <= 0:
-            self.state, self.state_time = "telegraph", .52
+            self._start_telegraph(.52)
         elif self.state == "telegraph" and self.state_time <= 0:
             self.state, self.state_time = "idle", 1.1
             origin_y = self.y - 28
@@ -457,6 +497,11 @@ class CombatArena:
         self.wave_wait = 0.0
         self.encounter_time = 0.0
         self.enemies: list[object] = []
+        self._pressure_time = 0.0
+        self._last_attack_start = -1.0
+        self._pressure_queue = []
+        self._pressure_requests = {}
+        self._pressure_player = None
         self.boss_kind = None
         self.boss_cue_started = False
         self.boss_intro_time = 0.0
@@ -521,11 +566,10 @@ class CombatArena:
         # Let bodies approach the gate's inside face while still keeping them
         # on the playable side of both paper strokes.
         enemy_bounds = (self.start_x - 45, self.end_x - 35)
+        self._coordinate_pressure(ctx, dt)
         for enemy in self.enemies:
-            self._coordinate_pressure()
             enemy.update(dt, ctx, enemy_bounds)
         self._frame_active_fight(ctx)
-        self._coordinate_pressure()
         self._update_audio_pressure(ctx)
         self.enemies = [e for e in self.enemies if not e.dead]
         if self.enemies or ctx.player.health <= 0:
@@ -678,35 +722,105 @@ class CombatArena:
             focus = max(low, min(high, focus))
         ctx.camera.script_target = focus
 
-    def _coordinate_pressure(self):
-        """Keep combinations demanding without stacking unreadable attacks."""
-        committed = {
-            "charge", "dive", "slam", "stomp", "sweep", "snap", "burst",
-            "crossout", "erase_slam", "mirror_storm", "boss_attack",
-            "draw_cut", "pounce", "roll", "ram", "comet_dash",
-            "counter_cut", "red_stamp", "proof_volley", "margin_burst",
-            "agent_burst", "shear", "drop", "echo_slash",
-            "bounty_volley", "rail_rush", "staple_columns", "moon_release", "meteor_fall",
-            "return_sweep", "cross_cut", "redaction_wall",
-        }
-        telegraphs = {state for state in (
-            "charge_telegraph", "dive_telegraph", "slam_telegraph",
-            "stomp_warn", "sweep_warn", "snap_telegraph", "aim",
-            "boss_telegraph", "pattern_telegraph",
-            "sheath", "snicker", "quickdraw", "rustle", "lock", "scan",
-            "flare", "prickle", "tail_warn", "ram_warn", "agent_aim", "cut_warn", "drop_warn", "copy",
-            "sweep_telegraph", "bounty_draw", "rail_whistle", "staple_columns_warn",
-            "moon_release_warn", "meteor_warn", "return_whistle", "return_telegraph", "cross_warn",
-        )}
-        active = sum(getattr(enemy, "state", "") in committed | telegraphs
-                     for enemy in self.enemies if not getattr(enemy, "dead", False))
-        if active < 2:
-            return
+    @staticmethod
+    def _attack_committed(enemy):
+        state = getattr(enemy, "state", "")
+        return (state in ATTACK_WARNINGS or state in ATTACK_COMMITMENTS
+                or state in getattr(enemy, "contact_states", ()))
+
+    @staticmethod
+    def _pressure_role(enemy):
+        if getattr(enemy, "is_boss", False) or getattr(enemy, "kind", "") == "boss":
+            return "boss"
+        return ENCOUNTER_ROLES.get(getattr(enemy, "kind", ""), "close")
+
+    def _nearby_hazard(self, enemy):
+        player = self._pressure_player
+        if player is None:
+            return False
+        nearby = player.rect.inflate(340, 230)
+        for shot in getattr(enemy, "projectiles", ()):
+            if getattr(shot, "life", 0) <= 0:
+                continue
+            # Include an approaching shot, but release pressure after it has
+            # passed the player. Old bullets across the room are not a lock.
+            horizon = min(.32, shot.life)
+            future = shot.rect.move(round(getattr(shot, "vx", 0) * horizon),
+                                    round(getattr(shot, "vy", 0) * horizon
+                                          + .5 * getattr(shot, "gravity", 0) * horizon ** 2))
+            if shot.rect.union(future).colliderect(nearby):
+                return True
+        for edit in getattr(enemy, "_temporary_erases", ()):
+            if edit.get("time", 0) <= 0:
+                continue
+            for left, right in edit.get("after", ()):
+                if (left, right) in edit.get("before", ()):
+                    continue
+                floor = edit["platform"]
+                if (right >= nearby.left and left <= nearby.right
+                        and abs(floor.y_at(player.center_x) - player.rect.bottom) < 115):
+                    return True
+        return False
+
+    def _pressure_load(self):
+        # A volley is one source, regardless of bullet count. Its role remains
+        # occupied in recovery while its projectiles or erased floor are near.
+        return [self._pressure_role(enemy) for enemy in self.enemies
+                if not getattr(enemy, "dead", False)
+                and (self._attack_committed(enemy) or self._nearby_hazard(enemy))]
+
+    def _role_can_enter(self, enemy, load):
+        role = self._pressure_role(enemy)
+        if len(load) >= 2 or "boss" in load or role in load:
+            return False
+        # A fan and an area denial attack both close escape lanes. Pair either
+        # with a body to dodge/punish, never with another screen-filling source.
+        return not (role in {"ranged", "area"} and any(
+            active in {"ranged", "area"} for active in load))
+
+    def _admit_attack(self, enemy, next_state):
+        # Boss scripts and transitions within an already announced attack are
+        # autonomous. Only the first warning asks for admission. MoonBot's
+        # charge is its visible ranged windup despite the shared state name.
+        if (self._pressure_role(enemy) == "boss"
+                or self._attack_committed(enemy)
+                or (next_state not in ATTACK_WARNINGS
+                    and not (enemy.kind == "moon_bot" and next_state == "charge"))):
+            return True
+        key = id(enemy)
+        self._pressure_requests[key] = self._pressure_time
+        if enemy not in self._pressure_queue:
+            self._pressure_queue.append(enemy)
+        if self._pressure_time - self._last_attack_start < .24:
+            return False
+        load = self._pressure_load()
+        # Requests keep their place when another role is admitted. Each source
+        # goes to the back after starting; the list update order cannot let it
+        # repeatedly jump ahead of a waiting peer.
+        eligible = next((waiting for waiting in self._pressure_queue
+                         if self._role_can_enter(waiting, load)), None)
+        if eligible is not enemy:
+            return False
+        self._pressure_queue.remove(enemy)
+        self._pressure_requests.pop(key, None)
+        self._last_attack_start = self._pressure_time
+        return True
+
+    def _coordinate_pressure(self, ctx=None, dt=0.0):
+        """Space new warnings without freezing pursuit or announced attacks."""
+        self._pressure_time += dt
+        if ctx is not None:
+            self._pressure_player = ctx.player
+        live_ids = {id(enemy) for enemy in self.enemies if not getattr(enemy, "dead", False)}
+        self._pressure_queue = [enemy for enemy in self._pressure_queue
+                                if id(enemy) in live_ids
+                                and not self._attack_committed(enemy)
+                                and getattr(enemy, "hit_stun", 0) <= 0
+                                and self._pressure_time - self._pressure_requests.get(id(enemy), -1) < .15]
+        self._pressure_requests = {id(enemy): self._pressure_requests[id(enemy)]
+                                   for enemy in self._pressure_queue}
         for enemy in self.enemies:
-            if getattr(enemy, "state", "") in ("idle", "patrol", "hover", "orbit", "drift",
-                    "compass_measure", "poster_shuffle", "rail_approach", "orbit_align") \
-                    and getattr(enemy, "state_time", 1) < .16:
-                enemy.state_time = max(enemy.state_time, .24)
+            enemy.attack_admission = self._admit_attack
 
     def _update_audio_pressure(self, ctx):
         """Let the score watch the fight instead of acting like a room switch."""

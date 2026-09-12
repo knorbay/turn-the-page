@@ -348,9 +348,12 @@ class PaperProjectile:
                     continue
                 self.hit_ids.add(identity)
                 direction = 1 if self.vx >= 0 else -1
-                system.damage_enemy(enemy, self.damage, direction, self.knockback,
-                                    self.stagger, self.kind, ctx, self.attack_id)
-                system.impact(self.x, self.y, self.kind, self.radius + 6)
+                applied = system.damage_enemy(
+                    enemy, self.damage, direction, self.knockback,
+                    self.stagger, self.kind, ctx, self.attack_id, source_x=old_x,
+                )
+                if applied:
+                    system.impact(self.x, self.y, self.kind, self.radius + 6)
                 if self.kind == "rubber_band" and self.bounces > 0:
                     self.vx *= -1
                     if self.visual != "pulse":
@@ -529,6 +532,9 @@ class PencilBlade(BaseWeapon):
         if combo > 3:
             combo = 1
         system.combo_index = combo
+        if style == "bowie" and combo == 1:
+            # A fresh chain cannot spend marks left by an earlier attempt.
+            system._bowie_marks.clear()
 
         # Each page's starter uses a different combat grammar.  The save id is
         # intentionally stable, but these are authored attacks rather than one
@@ -1036,8 +1042,8 @@ class WeaponSystem:
                     # Bowie cuts only cash out when all three strokes stay on
                     # one target.  Whiffing or changing targets loses the bonus.
                     bowie_marks = self._bowie_marks.get(identity, (0, 0))[0]
-                    if swing.style == "bowie" and swing.combo == 3:
-                        damage += min(2, bowie_marks) * .72
+                    if swing.style == "bowie" and swing.combo == 3 and bowie_marks == 2:
+                        damage += 1.44
 
                     # The field knife is deliberately weak at opening a fight,
                     # then becomes lethal once a non-boss is visibly wounded.
@@ -1051,8 +1057,10 @@ class WeaponSystem:
                     applied = self.damage_enemy(enemy, damage, direction, knockback,
                                                 stagger, kind, ctx)
                     if applied and swing.style == "bowie":
-                        if swing.combo < 3:
-                            self._bowie_marks[identity] = (min(2, bowie_marks + 1), .86)
+                        if swing.combo == 1:
+                            self._bowie_marks[identity] = (1, .86)
+                        elif swing.combo == 2 and bowie_marks == 1:
+                            self._bowie_marks[identity] = (2, .86)
                         else:
                             self._bowie_marks.pop(identity, None)
                     if applied and swing.style == "katana" and swing.combo == 3 \
@@ -1065,8 +1073,9 @@ class WeaponSystem:
                         self.weapons["pencil_blade"].cooldown = min(
                             self.weapons["pencil_blade"].cooldown, .055,
                         )
-                    self.impact(rect.centerx, rect.centery, kind,
-                                20 if swing.combo == 3 else 12)
+                    if applied:
+                        self.impact(rect.centerx, rect.centery, kind,
+                                    20 if swing.combo == 3 else 12)
             if self.melee.finished:
                 self.melee = None
         self.player.combat_swing = (self.melee.pencil_pose()
@@ -1084,7 +1093,7 @@ class WeaponSystem:
         self.impacts = [mark for mark in self.impacts if mark.life > 0]
 
     def damage_enemy(self, enemy, damage, direction, knockback, stagger, damage_kind, ctx,
-                     attack_id=0):
+                     attack_id=0, source_x=None):
         if getattr(enemy, "dead", False):
             return False
         boss_target = bool(getattr(enemy, "is_boss", False)
@@ -1115,7 +1124,10 @@ class WeaponSystem:
                 tags.update(("heavy", "finisher", "heroic"))
             if attack_id:
                 tags.add(f"attack:{int(attack_id)}")
-            applied = weapon_hit(damage, knockback, self.player.center_x, tags, ctx) is not False
+            # Directional armour reads the incoming projectile, including a
+            # ricochet, rather than the shooter's position at impact time.
+            source = self.player.center_x if source_x is None else float(source_x)
+            applied = weapon_hit(damage, knockback, source, tags, ctx) is not False
             if applied and damage_kind == "marker" and attack_id and boss_target:
                 self._boss_marker_volleys.add(volley_key)
             return applied
@@ -1320,6 +1332,7 @@ class WeaponSystem:
         return True
 
     def draw_world(self, surface, camera, renderer):
+        self._draw_technique_marks(surface, camera)
         for projectile in self.projectiles:
             projectile.draw(surface, camera)
         for mark in self.impacts:
@@ -1331,6 +1344,63 @@ class WeaponSystem:
             color = (113, 88, 82) if self.current_id == "eraser_cannon" else INK_LIGHT
             pygame.draw.arc(surface, color, (x - 8, y - 8, 16, 16), .2, 1.35, 1)
             pygame.draw.arc(surface, color, (x - 8, y - 8, 16, 16), 3.35, 4.5, 1)
+
+    def technique_cues(self):
+        """Local marks explain blade opportunities without revealing bosses."""
+        if (self.current_id != "pencil_blade" or self.player.locked
+                or self.player.health <= 0):
+            return []
+        style = self.profile().silhouette
+        if style not in ("bowie", "field_knife"):
+            return []
+        cues = []
+        for enemy in self._last_enemies:
+            if (getattr(enemy, "dead", False) or getattr(enemy, "is_boss", False)
+                    or getattr(enemy, "kind", "") == "boss"
+                    or not getattr(enemy, "vulnerable", True)):
+                continue
+            rect = _enemy_rect(enemy)
+            if rect is None or abs(rect.centerx - self.player.center_x) > 280:
+                continue
+            if style == "bowie":
+                count, remaining = self._bowie_marks.get(id(enemy), (0, 0))
+                if count and remaining > 0:
+                    cues.append((rect, "cuts", count, min(1.0, remaining / .3)))
+            else:
+                hp = float(getattr(enemy, "hp", 0))
+                max_hp = float(getattr(enemy, "max_hp", hp))
+                if 0 < hp <= max_hp * .55:
+                    ready = self.combo_index == 2 and self.combo_window > 0
+                    cues.append((rect, "execution", 2 if ready else 1, 1.0))
+        return cues
+
+    def _draw_technique_marks(self, surface, camera):
+        # These little cuts belong to the enemy drawing, not a floating meter.
+        # The pale third cut becomes a crossed-out paper tear on a cash-out.
+        accent = self.profile().accent
+        for rect, kind, count, strength in self.technique_cues():
+            x = camera.screen_x(rect.right + 9)
+            y = round(rect.centery - 9 + camera.offset_y)
+            color = tuple(round(176 + (component - 176) * strength) for component in accent)
+            if kind == "cuts":
+                for index in range(3):
+                    top = (x + index * 5 + 4, y)
+                    bottom = (x + index * 5, y + 11)
+                    if index < count:
+                        pygame.draw.line(surface, color, top, bottom, 2)
+                    else:
+                        pygame.draw.line(surface, (181, 169, 146), top, (top[0]-1, y+3), 1)
+                        pygame.draw.line(surface, (181, 169, 146), (bottom[0]+1, y+8), bottom, 1)
+                if count == 2:
+                    pygame.draw.line(surface, color, (x-2, y+15), (x+15, y+15), 1)
+            else:
+                # A folded, exposed corner hints at a wounded drawing. It
+                # closes into a sharp knife-shaped notch when cut three is next.
+                pygame.draw.lines(surface, color, False,
+                                  [(x+9, y-3), (x, y+6), (x+9, y+15)], 2)
+                if count == 2:
+                    pygame.draw.line(surface, color, (x+12, y-3), (x+12, y+15), 2)
+                    pygame.draw.line(surface, color, (x+3, y+6), (x+16, y+6), 1)
 
     def _draw_melee(self, surface, camera):
         swing = self.melee
@@ -1443,6 +1513,11 @@ class WeaponSystem:
         renderer.doodle_text(surface, profile.label, (x + 14, y + 5), INK, renderer.font_small, -1)
         weapon = self.current
         role = "Finishing stroke" if self.current_id == "pencil_blade" and self.combo_index == 3 and self.melee else profile.role
+        cues = self.technique_cues()
+        if any(kind == "cuts" and count == 2 for _, kind, count, _ in cues):
+            role = "two cuts held · finish the mark"
+        elif any(kind == "execution" and count == 2 for _, kind, count, _ in cues):
+            role = "third cut · execute the wound"
         renderer.doodle_text(surface, role, (x + 14, y + 27), INK_LIGHT, renderer.font_small)
         for index, weapon_id in enumerate(available):
             bx = x + 32 + index * 46

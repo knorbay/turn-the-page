@@ -7,7 +7,7 @@ import pygame
 from game import Game
 from input_state import InputFrame
 from runtime_paths import default_save_path
-from settings import WIDTH, HEIGHT
+from settings import WIDTH, HEIGHT, VERSION
 
 
 def verify(output):
@@ -29,7 +29,7 @@ def verify(output):
         game.save.write()
         game.save.load()
         assert game.save.path.exists()
-        report={"frozen":bool(getattr(sys,"frozen",False)),"pages":pages,
+        report={"version":VERSION,"frozen":bool(getattr(sys,"frozen",False)),"pages":pages,
                 "save_path":str(default_save_path()),"audio":game.sounds.enabled,
                 "asset_root":str(game.sounds.asset_root)}
     pygame.quit()

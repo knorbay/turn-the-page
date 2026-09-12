@@ -1,19 +1,21 @@
-# TURN THE PAGE — Beta 0.9.0 r7
+# TURN THE PAGE — Beta 0.9.0 r8
 
 TURN THE PAGE is a combat-heavy 2D action game drawn across five school-notebook
 pages. The Artist outside the paper can redraw the hero, lend era-specific
 weapons, alter arenas, mock a defeat, or change the final confrontation based
 on how the player fights.
 
-This revision focuses on combat identity:
+This revision focuses on readable, deliberate combat:
 
-- Three new enemies: Gutter Lantern locks a falling ink column, Rake Cactus fires a timed low volley, and Ember Hound leaves a brief spark trail.
-- Each page's starting blade has a distinct technique: katana launcher, same-target Bowie combo, piercing Ion Edge wave, wounded-target Field Knife execution, and delayed redraw stroke.
-- Six named bosses gain new phases: return arcs, four-poster crossfire, a return train pass, expanding moon constellations, physical floor cuts, and the Final Editor's clean-margin redaction.
-- Page-specific weapon sounds, varied impact cues, dedicated enemy warnings, and boss phase/opening effects.
-- The main-character logo and Baby-Face signature sequence remain.
+- Grounded running, articulated jumps and landings, fading dash impressions, and page-specific full-body blade stances.
+- Bowie cuts leave visible marks on their target. The full bonus requires all three cuts in the same chain. The Field Knife marks wounded targets and its next finishing cut.
+- Projectiles test directional armour from the side they actually approach. Banked shots can reach a train's rear even when the player stands in front.
+- Blocked hits no longer draw successful weapon-impact marks.
+- Boss attack warnings and opening marks follow their actual attack direction, remaining punish hits, and recovery time.
+- Enemy attack starts are coordinated with nearby lingering threats while preserving distinct enemy roles.
+- The menu and download filenames show the r8 revision.
 
-138 automated tests pass, including the complete five-page route. Native packages are built and checked on each target operating system.
+The five-page campaign, three-heart fight resets, earned weapons, and Baby-Face reversal remain compatible with existing saves.
 
 This beta includes:
 

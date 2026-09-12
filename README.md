@@ -12,6 +12,8 @@ The latest combat pass adds three readable enemy variants: Gutter Lantern locks 
 
 All six named bosses now escalate through distinct performances: returning compass arc, four-poster crossfire, express train return pass, expanding moon constellations and impact shards, scissors with real temporary floor cuts and marked X attacks, and the Final Editor's clean-margin redaction. Baby-Face keeps its signature sequence. Weapon sounds use page-specific cues, subtle variations and short mix ducking; enemy warnings and boss openings have dedicated cues.
 
+The r8 pass adds planted running and clearer jump, landing, dash, and blade poses. Small marks on nearby enemies explain the Bowie's same-target chain and the Field Knife's wounded-target finish. Directional armour now reads a projectile's approach side, so a banked rear hit behaves correctly; blocked attacks no longer display successful cut marks. The title screen and native archive names identify the current revision.
+
 ## Run
 
 Python 3.10+ and Pygame 2.5–2.x are required.
@@ -88,7 +90,7 @@ python3 -m unittest discover -s tests -q
 python3 tools/render_beta_review.py
 ```
 
-138 tests pass, including an informed new-game-to-ending pilot through all five pages with only the two scripted Baby-Face defeats. This is automated progression verification; human completion time and first-play difficulty require playtesting.
+160 tests pass, including an informed new-game-to-ending pilot through all five pages with only the two scripted Baby-Face defeats. This is automated progression verification; human completion time and first-play difficulty require playtesting.
 
 Additional checks cover physical platforms, checkpoints, projectile returns, actual stagger, all four final layouts, save migration, shootable decoys, train rear vulnerability, orbital armour and protected audio channels. The Final Editor now locks and draws its aim before firing and converts leftover projectiles to harmless graphite when its clip opens. All six direct boss practice entries were opened and rendered using the runtime.
 

@@ -15,6 +15,16 @@ The beta contains five pages, 23 combat rooms, 20 ordinary enemy types, six
 named bosses, twelve Lost Sketch techniques, four finale variants, and one very
 large baby face that makes the Artist reconsider fairness.
 
+## Beta r8 — Read the Fight
+
+- Planted running, clear jump and landing poses, pencil dash traces, and distinct blade stances.
+- Visible Bowie combo cuts and Field Knife finishing opportunities.
+- Boss warnings that keep their aim, and opening marks that match the real chance to strike.
+- Coordinated enemy attacks that account for nearby lingering shots.
+- Correct directional armour for banked hits, and cleaner hit feedback.
+
+Available for Windows, Linux, and macOS. Existing saves remain compatible.
+
 ## Controls
 
 - Move: A/D or arrow keys
@@ -30,6 +40,6 @@ Controller support is included. The game saves automatically.
 
 ## Beta note
 
-This is the first public beta. Please report the page/room name, what you were
+This is a public beta. Please report the page/room name, what you were
 doing, and whether you used keyboard/mouse or a controller. Windows and Linux
 builds are unsigned. The macOS build is not Apple-notarized yet.

@@ -14,7 +14,7 @@ from paper_renderer import PaperRenderer, jitter_line
 from particles import ParticleSystem
 from player import Player
 from save_system import SaveSystem
-from settings import HEIGHT, INK, INK_LIGHT, RED_RULE, WIDTH
+from settings import HEIGHT, INK, INK_LIGHT, RED_RULE, VERSION, WIDTH
 from weapons import WEAPON_ORDER, WeaponSystem
 from sketches import SKETCHES, apply_sketch_rewards, draw_sketch_card, wrap_text
 from health_hud import draw_health
@@ -1115,6 +1115,8 @@ class Game:
         if self.joysticks:
             self.renderer.doodle_text(self.screen, "CONTROLLER CONNECTED", (24, 655),
                                       INK_LIGHT, self.renderer.font_small, -1)
+        version = self.renderer.font_small.render(VERSION, True, INK_LIGHT)
+        self.screen.blit(version, version.get_rect(center=(WIDTH // 2, 665)))
 
     def _menu_rect(self, index, count):
         start = 340 - (count - 3) * 28

@@ -1,4 +1,15 @@
-## Son combat cilası
+## Beta r8 — Hareket ve dövüş okunabilirliği
+
+- Koşuda yere basan ayaklar, eklemli sıçrama/iniş pozları, kısa kalem dash izleri ve sayfaya özel vuruş duruşları.
+- Çizerin kalemi yeniden çizilen karakterin gerçek diz ve ayak çizgilerini takip eder.
+- Bowie zincirinin hedefte kalan kesikleri ve Field Knife bitiriş fırsatı görünür. Yarım kalmış eski kombolar tam zincir bonusu vermez.
+- Sekmiş atışlar zırhı gerçekten geldikleri yönden sınar; engellenen vuruşlar başarılı kesik efekti üretmez.
+- Final bossun yönü ve yörünge bossunun atış çizgileri uyarıdan sonra değişmez. Açıklık işaretleri kalan vuruş hakkıyla birlikte kapanır.
+- Düşmanlar yeni saldırı uyarılarını aralıklı başlatır; yakındaki mermiler ve silinen zemin de hesaba katılır. Başlamış saldırı ve takip hareketi durdurulmaz.
+- Menü ve indirilen dosyalar r8 sürümünü gösterir. Mevcut kayıtlar uyumludur.
+- 160 otomatik kontrol; gerçek oyun çizimleriyle altı bossun açık/kapalı hâlleri ve beş sayfanın hareket pozları incelendi.
+
+## Önceki combat cilası
 
 - Üç yeni düşman: kilitli mürekkep sütunu, üçlü alçak iğne yaylımı ve hücumdan sonra kıvılcım izi.
 - Beş sayfanın başlangıç yakın dövüş silahı ayrı kombolara ve özel etkilere sahip.

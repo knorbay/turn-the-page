@@ -47,6 +47,13 @@ class Player:
         self.combat_swing = None
         self.redraw_variant = "clean"
         self.page_style = "plain"
+        # Animation follows distance travelled; collision and attack timing
+        # remain owned by the controller and weapon system.
+        self.stride_phase = 0.0
+        self.motion_speed = 0.0
+        self.dash_impressions = []
+        self._impression_clock = 0.0
+        self._motion_last_position = (self.x, self.y)
 
     @property
     def locked(self):
@@ -123,28 +130,34 @@ class Player:
     def redraw_tip(self):
         """World-space endpoint of the currently active redraw stroke."""
         p = max(0.0, min(1.0, self.draw_amount))
-        cx = self.center_x
-        bottom = self.y + self.HEIGHT
-        hip = bottom - 16
-        shoulder = hip - 24
-        head_y = shoulder - 9
-        if p < .20:
+        pose = self._body_pose()
+        for start, end, begin, finish, _ in reversed(self._redraw_strokes(pose)):
+            if p >= begin:
+                t = min(1.0, (p - begin) / (finish - begin))
+                return (start[0] + (end[0] - start[0]) * t,
+                        start[1] + (end[1] - start[1]) * t)
+        if p < .16:
             angle = -math.pi / 2 + math.tau * (p / .20)
-            return cx + math.cos(angle) * 7, head_y + math.sin(angle) * 7
-        if p < .40:
-            t = (p - .20) / .20
-            return cx, shoulder + (hip - shoulder) * t
-        if p < .55:
-            t = (p - .40) / .15
-            return cx + 12 * t, shoulder + 7 + 14 * t
-        if p < .70:
-            t = (p - .55) / .15
-            return cx - 12 * t, shoulder + 7 + 14 * t
-        if p < .85:
-            t = (p - .70) / .15
-            return cx - 9 * t, hip + (bottom - hip) * t
-        t = (p - .85) / .15
-        return cx + 9 * t, hip + (bottom - hip) * t
+            return (pose["head"][0] + math.cos(angle) * pose["radius"],
+                    pose["head"][1] - math.sin(angle) * pose["radius"])
+
+    def _redraw_strokes(self, pose):
+        """The Artist and the visible body follow the same articulated lines."""
+        shoulder, hip = pose["shoulder"], pose["hip"]
+        arm = (shoulder[0], shoulder[1] + 7)
+        swing = -math.sin(self.stride_phase) * 7 * self.motion_speed
+        left, right = (1.42, .78) if self.redraw_variant == "long_arm" else (1, 1)
+        strokes = [
+            (shoulder, hip, .16, .36, 3),
+            (arm, (arm[0] + swing*left, arm[1] + 14*left), .32, .52, 2),
+            (arm, (arm[0] - swing*right, arm[1] + 14*right), .46, .66, 2),
+        ]
+        for index, (knee, foot) in enumerate(pose["legs"]):
+            begin, finish = (.60, .82) if index == 0 else (.76, 1.0)
+            middle = (begin + finish) / 2
+            strokes.extend(((hip, knee, begin, middle, 3),
+                            (knee, foot, middle, finish, 3)))
+        return sorted(strokes, key=lambda stroke: stroke[2])
 
     @property
     def attack_active(self):
@@ -185,6 +198,8 @@ class Player:
         return changed
 
     def update(self, dt, move_axis, world, particles):
+        motion_start = (self.x, self.y)
+        discontinuity = math.dist(motion_start, self._motion_last_position) > 80
         self.anim_time += dt
         self.attack_timer = max(0.0, self.attack_timer - dt)
         self.attack_cooldown = max(0.0, self.attack_cooldown - dt)
@@ -248,6 +263,123 @@ class Player:
             particles.paper_puff(self.center_x, self.y + self.HEIGHT, 7)
         self.was_grounded = self.on_ground
         self.land_squash = self._approach(self.land_squash, 0.0, dt * 1.5)
+        self._update_motion(dt, motion_start, discontinuity)
+
+    def _update_motion(self, dt, previous, discontinuity=False):
+        """Bounded, world-space pencil impressions never survive a redraw."""
+        dx = self.x - previous[0]
+        self._motion_last_position = (self.x, self.y)
+        self.motion_speed = self._approach(self.motion_speed,
+                                           min(1.0, abs(self.vx) / 285), dt * 8)
+        if self.on_ground and not self.dashing:
+            self.stride_phase = (self.stride_phase + abs(dx) * math.tau / 72) % math.tau
+        if discontinuity or self.draw_amount < 1 or self.redraw_alpha < .8 \
+                or self.health <= 0 or self.locked:
+            self.dash_impressions.clear()
+            self._impression_clock = 0.0
+            return
+        self.dash_impressions = [(pose, life - dt) for pose, life in self.dash_impressions
+                                 if life > dt]
+        self._impression_clock = max(0.0, self._impression_clock - dt)
+        if self.dashing and abs(dx) >= 4 and self._impression_clock <= 0:
+            self.dash_impressions.append((self._body_pose(), .15))
+            self.dash_impressions = self.dash_impressions[-5:]
+            self._impression_clock = .027
+
+    def _body_pose(self):
+        """An articulated ink skeleton; all positions are visual/world-space."""
+        cx, bottom = self.center_x, self.y + self.HEIGHT
+        facing, speed = self.facing, self.motion_speed
+        squash = self.land_squash
+        stretch = 1.0 - squash
+        leg_scale = 1.22 if self.redraw_variant == "long_leg" else .92 if self.redraw_variant == "rushed" else 1.0
+        hip_y = bottom - 16 * stretch * leg_scale
+        shoulder_y = hip_y - (22 if self.redraw_variant == "rushed" else 24) * stretch
+        hip_x = cx
+        lean = facing * speed * 4 if self.on_ground else max(-4, min(4, self.vx / 70))
+        legs = []
+        if self.on_ground:
+            bob = abs(math.sin(self.stride_phase)) * speed * 1.8
+            hip_y -= bob
+            shoulder_y -= bob
+            for offset in (0, math.pi):
+                cycle = ((self.stride_phase + offset) % math.tau) / math.tau
+                if cycle < .5:
+                    # During stance the sole travels backwards at ground speed.
+                    foot_x, lift = 18 - cycle * 72, 0
+                else:
+                    t = (cycle - .5) * 2
+                    foot_x = -18 + 36 * (t*t*(3-2*t))
+                    lift = math.sin(t * math.pi) * 10
+                rest = -7 if offset == 0 else 7
+                foot_x = cx + facing * (rest * (1-speed) + foot_x * speed)
+                foot_y = bottom - lift * speed
+                knee = (cx + (foot_x-cx)*.42 + facing*3*speed,
+                        hip_y + (foot_y-hip_y)*.50 - lift*speed*.30)
+                legs.append((knee, (foot_x, foot_y)))
+        else:
+            # Rise folds one knee, the apex opens the silhouette, and a fall
+            # reaches a toe down before the landing compression takes over.
+            rise = max(0.0, min(1.0, -self.vy / 450))
+            fall = max(0.0, min(1.0, self.vy / 500))
+            legs = [((cx + facing*(6 + rise*3), hip_y + 6 - rise*4),
+                     (cx + facing*(9 + rise*3), bottom - 4 - rise*10)),
+                    ((cx - facing*6, hip_y + 8),
+                     (cx - facing*(8-fall*4), bottom - 5 + fall*5))]
+            shoulder_y -= rise * 1.5
+
+        if self.dashing and self.draw_amount >= 1:
+            hip_y = bottom - 13
+            shoulder_y = hip_y - 19
+            lean = facing * 12
+            legs = [((cx-facing*9, hip_y+3), (cx-facing*24, bottom-4)),
+                    ((cx+facing*9, hip_y+6), (cx+facing*3, bottom-2))]
+        elif self.combat_swing is not None and self.draw_amount >= 1:
+            angle, _, power = self.combat_swing
+            shape = profile_for(getattr(self, "arsenal_page", None), "pencil_blade").silhouette
+            weight, crouch, stance = {
+                "katana": (6, 2, 17), "bowie": (9, 4, 16),
+                "field_knife": (11, 6, 18), "ion_blade": (4, -1, 20),
+                "redraw_pencil": (5, 1, 13),
+            }.get(shape, (5, 1, 15))
+            force = max(0, power)
+            lean = facing * (weight * power + 2)
+            hip_x += facing * force * 2
+            shoulder_y += crouch * force
+            hip_y += max(0, crouch) * force * .5
+            if shape == "katana":
+                shoulder_y += math.sin(angle) * force * 2
+            if self.on_ground:
+                legs = [((cx+facing*8, hip_y+8), (cx+facing*stance, bottom)),
+                        ((cx-facing*8, hip_y+7), (cx-facing*(stance-3), bottom))]
+
+        shoulder = (hip_x + lean, shoulder_y)
+        head_x = shoulder[0] + (4*facing if self.redraw_variant == "crooked_head" else
+                                -2 if self.redraw_variant == "rushed" else 0)
+        if self.dashing:
+            head_x += facing * 3
+        head = (head_x, shoulder_y - 9*stretch)
+        return {"head": head, "radius": max(5, round(7*(1+squash*.65))),
+                "shoulder": shoulder, "hip": (hip_x, hip_y), "legs": legs,
+                "facing": facing}
+
+    def _draw_dash_impressions(self, surface, camera):
+        if self.draw_amount < 1 or self.redraw_alpha < .8 or self.locked or self.health <= 0:
+            return
+        def screen(point):
+            return (round(camera.screen_x(point[0])), round(point[1]+camera.offset_y))
+        for pose, life in self.dash_impressions:
+            # Pale retraced pencil lines, with no fullscreen alpha surfaces.
+            fade = 1 - min(1, life / .15)
+            ink = (round(163+fade*62), round(158+fade*61), round(150+fade*61))
+            head, shoulder, hip = pose["head"], pose["shoulder"], pose["hip"]
+            pygame.draw.circle(surface, ink, screen(head), pose["radius"], 1)
+            pygame.draw.line(surface, ink, screen(shoulder), screen(hip), 1)
+            for knee, foot in pose["legs"]:
+                pygame.draw.lines(surface, ink, False, [screen(hip), screen(knee), screen(foot)], 1)
+            elbow = (shoulder[0]-pose["facing"]*11, shoulder[1]+10)
+            hand = (elbow[0]-pose["facing"]*6, elbow[1]-3)
+            pygame.draw.lines(surface, ink, False, [screen(shoulder), screen(elbow), screen(hand)], 1)
 
     @staticmethod
     def _approach(value, target, amount):
@@ -307,32 +439,18 @@ class Player:
                 rect = self.rect
 
     def draw(self, surface, camera):
+        self._draw_dash_impressions(surface, camera)
         cx = camera.screen_x(self.center_x)
-        bottom = round(self.y + self.HEIGHT + camera.offset_y)
-        speed = min(1.0, abs(self.vx) / 260)
-        phase = self.anim_time * (4 + speed * 10)
-        squash = self.land_squash
-        stretch_y = 1.0 - squash
-        stretch_x = 1.0 + squash * .65
-        variant = self.redraw_variant
-        leg_scale = 1.22 if variant == "long_leg" else .92 if variant == "rushed" else 1.0
-        left_arm_scale = 1.42 if variant == "long_arm" else 1.0
-        right_arm_scale = .78 if variant == "long_arm" else 1.0
-        body_h = (22 if variant == "rushed" else 24) * stretch_y
-        hip_y = bottom - 16 * stretch_y * leg_scale
-        shoulder_y = hip_y - body_h
-        head_y = shoulder_y - 9 * stretch_y
-        head_x = cx + (4 * self.facing if variant == "crooked_head" else
-                       -2 if variant == "rushed" else 0)
-        head_r = max(5, round(7 * stretch_x))
+        pose = self._body_pose()
+        def screen(point):
+            return (camera.screen_x(point[0]), point[1]+camera.offset_y)
+        shoulder_x, shoulder_y = screen(pose["shoulder"])
+        hip_x, hip_y = screen(pose["hip"])
+        head_x, head_y = screen(pose["head"])
+        head_r = pose["radius"]
         base_ink = (135, 48, 48) if self.hurt_flash > 0 and int(self.hurt_flash * 40) % 2 else INK
         ink = tuple(round(c * (.55 + .45 * self.redraw_alpha)) for c in base_ink)
 
-        leg_swing = (4*self.facing + math.sin(phase)*8*speed
-                     if self.on_ground else 4*self.facing)
-        if self.on_ground and self.combat_swing is not None:
-            leg_swing += self.facing*max(0,self.combat_swing[2])*4
-        arm_swing = -leg_swing * .75
         def stroke(start, end, begin, finish, width):
             progress = max(0.0, min(1.0, (self.draw_amount - begin) / max(.001, finish - begin)))
             if progress <= 0:
@@ -348,17 +466,17 @@ class Player:
                                     head_r * 2, head_r * 2)
             pygame.draw.arc(surface, ink, head_rect, -math.pi / 2,
                             -math.pi / 2 + math.tau * head_progress, 2)
-        stroke((cx, shoulder_y), (cx, hip_y), .16, .36, 3)
-        arm_y = shoulder_y + 7
-        if self.draw_amount < .82:
-            stroke((cx, arm_y),
-                   (cx + arm_swing * left_arm_scale, arm_y + 14 * left_arm_scale),
-                   .32, .52, 2)
-            stroke((cx, arm_y),
-                   (cx - arm_swing * right_arm_scale, arm_y + 14 * right_arm_scale),
-                   .46, .66, 2)
-        stroke((cx, hip_y), (cx - leg_swing, bottom), .60, .82, 3)
-        stroke((cx, hip_y), (cx + leg_swing, bottom), .76, 1.0, 3)
+        for start, end, begin, finish, width in self._redraw_strokes(pose):
+            if width == 2 and self.draw_amount >= .82:
+                continue
+            stroke(screen(start), screen(end), begin, finish, width)
+        for index, (knee, foot) in enumerate(pose["legs"]):
+            finish = .82 if index == 0 else 1.0
+            if self.draw_amount >= finish:
+                fx, fy = screen(foot)
+                # A short sole makes the planted contact readable at game scale.
+                pygame.draw.line(surface, ink, (round(fx), round(fy)),
+                                 (round(fx+self.facing*4), round(fy)), 2)
         # single face tick gives direction without turning the figure into vector art
         if self.draw_amount >= .18:
             look_y = -2 if self.look_target and self.look_target[1] < self.y else 1
@@ -376,8 +494,8 @@ class Player:
             else:
                 pygame.draw.arc(surface, (78, 75, 71), arc_rect, math.pi - 1.1, math.pi + 1.1, 2)
         if self.draw_amount >= .42:
-            self._draw_weapon_and_hands(surface, cx, shoulder_y, hip_y, ink,
-                                        self.rect.centery - 5 + camera.offset_y)
+            self._draw_weapon_and_hands(surface, shoulder_x, shoulder_y, hip_y, ink,
+                                        self.rect.centery - 5 + camera.offset_y, cx)
         if self.dashing and self.draw_amount >= .8:
             for index in range(3):
                 offset = self.facing * (27 + index * 17)
@@ -465,22 +583,25 @@ class Player:
                              (round(head_x - 5), round(hip_y + 3)),
                              (round(head_x + 5), round(shoulder_y - 2)), 1)
 
-    def _draw_weapon_and_hands(self, surface, cx, shoulder_y, hip_y, ink, combat_y):
+    def _draw_weapon_and_hands(self, surface, cx, shoulder_y, hip_y, ink, combat_y,
+                               combat_x=None):
         """Small grips keep the stick-figure hands readable during combat."""
         if self.current_weapon == "pencil_blade" and self.combat_swing is not None:
             angle, reach, power = self.combat_swing
             vector=pygame.Vector2(math.cos(angle),math.sin(angle))
             normal=pygame.Vector2(-vector.y,vector.x)
-            origin=pygame.Vector2(cx,combat_y)
+            origin=pygame.Vector2(cx if combat_x is None else combat_x,combat_y)
             hand=origin+vector*13
-            tip=origin+vector*reach
-            elbow=pygame.Vector2(cx-self.facing*3,shoulder_y+17)
-            pygame.draw.lines(surface,ink,False,[(cx,shoulder_y+7),elbow,hand],2)
-            support=hand-vector*6+normal*2
-            pygame.draw.lines(surface,ink,False,
-                [(cx,shoulder_y+10),(cx-self.facing*8,shoulder_y+19),support],2)
             page = getattr(self, "arsenal_page", None)
             shape = profile_for(page, "pencil_blade").silhouette
+            close_grip = shape in ("bowie", "field_knife")
+            elbow=pygame.Vector2(cx+self.facing*(5 if close_grip else -3),shoulder_y+17)
+            pygame.draw.lines(surface,ink,False,[(cx,shoulder_y+7),elbow,hand],2)
+            support = (pygame.Vector2(cx-self.facing*4, shoulder_y+10) if close_grip else
+                       pygame.Vector2(cx-self.facing*10, shoulder_y+15)
+                       if shape == "redraw_pencil" else hand-vector*6+normal*2)
+            pygame.draw.lines(surface,ink,False,
+                [(cx,shoulder_y+10),(cx-self.facing*8,shoulder_y+19),support],2)
             length = {"katana":47, "bowie":27, "field_knife":24,
                       "ion_blade":43, "pencil":40, "redraw_pencil":44}.get(shape, 40)
             draw_weapon(surface, "pencil_blade", page, hand, angle,

@@ -315,13 +315,53 @@ class AdvancedEnemy:
         return True
 
     def _set_state(self, name, duration):
+        admission = getattr(self, "attack_admission", None)
+        if admission is not None and not admission(self, name):
+            return False
         self.state = name
         self.state_time = float(duration)
         self.state_duration = max(.001, float(duration))
+        return True
 
     @property
     def pose_progress(self):
         return max(0.0, min(1.0, 1 - self.state_time / self.state_duration))
+
+    def opening_status(self):
+        """Visible punish marks share the health-damage window's hit budget."""
+        windows = {
+            "moon_compass": (("stuck",), 2),
+            "wanted_sketch": (("bounty_draw", "bounty_volley", "unravel"), 1),
+            "railroad_stapler": (("reload",), 2),
+            "orbital_mistake": (("unravel",), 3),
+            "scissor_director": (("open_hinge",), 3),
+            "final_editor": (("proof_window",), 2),
+        }
+        states, total = windows.get(self.kind, ((), 0))
+        if self.dead or self.state not in states or self.state_time <= 0:
+            return None
+        remaining = max(0, total - getattr(self, "window_hits", 0))
+        if not self._is_vulnerable():
+            remaining = 0
+        return remaining, total, max(0.0, min(1.0, self.state_time / self.state_duration))
+
+    def _draw_opening(self, surface, center, radius=22):
+        status = self.opening_status()
+        if status is None:
+            return
+        remaining, total, time_left = status
+        x, y = round(center[0]), round(center[1])
+        blue, spent = (68, 111, 130), (159, 148, 128)
+        if remaining:
+            pygame.draw.arc(surface, blue, (x-radius, y-radius, radius*2, radius*2),
+                            -math.pi/2, -math.pi/2 + max(.02, time_left*math.tau), 2)
+        for index in range(total):
+            tx = x + (index-(total-1)/2)*8
+            pygame.draw.line(surface, blue if index < remaining else spent,
+                             (tx+2, y+radius+4), (tx-1, y+radius+10), 2)
+        if not remaining:
+            pygame.draw.line(surface, spent, (x-7, y-5), (x+7, y+5), 2)
+            pygame.draw.line(surface, spent, (x-7, y+5), (x+7, y-5), 2)
 
     def _blocked_feedback(self, ctx, x=None, y=None):
         x = self.x if x is None else x
@@ -1007,8 +1047,8 @@ class InkClone(AdvancedEnemy):
             elif attack_serial != self.echo_attack_serial:
                 self.echo_attack_serial = attack_serial
                 self.facing = self.echo_facing
-                self._set_state("echo_telegraph", .18)
-                self.pressure_timer = 1.25
+                if self._set_state("echo_telegraph", .18):
+                    self.pressure_timer = 1.25
 
         if self.state == "echo_telegraph":
             self.vx *= .5
@@ -1032,8 +1072,8 @@ class InkClone(AdvancedEnemy):
             self.vx += (desired_vx - self.vx) * min(1, dt * 6)
             if self.pressure_timer <= 0 and abs(distance) < 62:
                 self.facing = 1 if distance > 0 else -1
-                self._set_state("echo_telegraph", .24)
-                self.pressure_timer = 1.35
+                if self._set_state("echo_telegraph", .24):
+                    self.pressure_timer = 1.35
 
     def _attack_rect(self):
         rect = self.rect
@@ -3126,8 +3166,10 @@ class MoonCompassBoss(AdvancedEnemy):
                 renderer.doodle_text(surface, "new centre", (tx - 46, floor - 35), blue,
                                      renderer.font_small, -2)
         elif self.state == "stuck":
-            renderer.doodle_text(surface, "PINNED!", (x - 38, y - 178), blue,
+            renderer.doodle_text(surface, "PINNED!" if self.vulnerable else "RESETTING",
+                                 (x - 38, y - 178), blue,
                                  renderer.font_small, -2)
+            self._draw_opening(surface, hinge, 36)
         if self.phase == 2:
             renderer.doodle_text(surface, "II / RETRACE", (x - 45, y - 205), red,
                                  renderer.font_small, 1)
@@ -3347,6 +3389,10 @@ class WantedSketchBoss(AdvancedEnemy):
                 target = (camera.screen_x(target_world[0]),
                           round(target_world[1] + camera.offset_y))
                 _dashed_line(surface, (166, 107, 84), (ax, y - 56), target, 1, 6, 9)
+        # Every poster carries the same timing mark. It must not reveal which
+        # of the drawings is alive; wet moving ink remains the tell.
+        for actor in [self] + [copy for copy in self.combat_targets if not copy.dead]:
+            self._draw_opening(surface, (camera.screen_x(actor.x), y - 54), 24)
         if self.state == "poster_escape":
             for offset in (-25, 0, 25):
                 pygame.draw.line(surface, (158, 139, 110),
@@ -3503,7 +3549,8 @@ class RailroadStaplerBoss(AdvancedEnemy):
         pygame.draw.rect(surface, ink, (rear - 14, y - 81, 25, 24), 2)
         pygame.draw.line(surface, ink, (rear - 29, y - 96), (rear + 29, y - 96), 5)
         hinge = (x - f * 24, y - 36)
-        opening = .9 if self.state == "reload" else .16 + (.18 * self.pose_progress if self.state == "rail_whistle" else 0)
+        opening = (.9 * min(1, self.state_time/.25) if self.state == "reload" and self.vulnerable
+                   else .16 + (.18 * self.pose_progress if self.state == "rail_whistle" else 0))
         nose = (x + f * 78, round(y - 36 - opening * 52))
         pygame.draw.line(surface, brass, hinge, nose, 25)
         pygame.draw.line(surface, ink, hinge, nose, 3)
@@ -3552,8 +3599,10 @@ class RailroadStaplerBoss(AdvancedEnemy):
                 renderer.doodle_text(surface, str(index + 1), (lx - 5, floor - 300),
                                      RED_RULE, renderer.font_small, 0)
         if self.state == "reload":
-            renderer.doodle_text(surface, "ENGINE OPEN", (x - 59, y - 160),
+            renderer.doodle_text(surface, "ENGINE OPEN" if self.vulnerable else "RELOADING",
+                                 (x - 59, y - 160),
                                  (77, 112, 128), renderer.font_small, -2)
+            self._draw_opening(surface, (x + f*39, y - 65), 24)
         if self.phase == 2:
             renderer.doodle_text(surface, "RETURN SERVICE", (x - 57, y - 129),
                                  RED_RULE, renderer.font_small, 1)
@@ -3647,7 +3696,10 @@ class OrbitalMistakeBoss(AdvancedEnemy):
                 self.y - 58 + math.sin(angle) * 55)
 
     def _think(self, dt, ctx, bounds):
-        self.orbit_angle += dt * (1.1 + self.phase * .24)
+        # Once the trajectories are shown, moons keep those launch positions
+        # until their volley is finished. The player's dodge can trust the ink.
+        if self.state not in ("moon_release_warn", "moon_release"):
+            self.orbit_angle += dt * (1.1 + self.phase * .24)
         self.vx = 0
         if self.state == "constellation_shift":
             self.y += (self.ground_y - 190 - self.y) * min(1, dt * 7)
@@ -3748,8 +3800,10 @@ class OrbitalMistakeBoss(AdvancedEnemy):
         else:
             pygame.draw.arc(surface, red, (x - 62, y - 115, 124, 117), .25, 2.2, 2)
             pygame.draw.arc(surface, red, (x - 62, y - 115, 124, 117), 3.45, 5.2, 2)
-            renderer.doodle_text(surface, "NO MOONS. NO ARMOUR.", (x - 99, y - 165),
+            renderer.doodle_text(surface, "CORE OPEN" if self.vulnerable else "CORE SEALED",
+                                 (x - 48, y - 184),
                                  blue, renderer.font_small, -2)
+            self._draw_opening(surface, center, 56)
         for plane in range(1, self.phase):
             pygame.draw.ellipse(surface, (147, 114, 113),
                                 (x - 64 - plane * 11, y - 130 - plane * 6,
@@ -3914,7 +3968,8 @@ class FinalEditorBoss(AdvancedEnemy):
         self._set_state("pattern_telegraph", duration)
 
     def _launch_pattern(self, ctx, bounds):
-        self.facing = 1 if ctx.player.center_x > self.x else -1
+        # Facing was committed with proof_target in the warning. Crossing the
+        # boss is valid counterplay, not a reason to turn its attack around.
         self.attack_done = False
         self.shot_index = 0
         if self.pattern == "counter_cut":
@@ -4103,6 +4158,13 @@ class FinalEditorBoss(AdvancedEnemy):
                    "proof_volley": "PROOF SHOTS", "margin_burst": "MARGINS CLOSE",
                    "redaction_wall": "FIND THE CLEAN MARGIN"}[self.pattern]
             self._draw_telegraph(surface, camera, renderer, cue)
+            if self.pattern in ("counter_cut", "red_stamp"):
+                floor = round(self.ground_y + camera.offset_y)-5
+                end = x + self.facing*235
+                _dashed_line(surface, RED_RULE, (x, floor), (end, floor), 2, 9, 6)
+                pygame.draw.lines(surface, RED_RULE, False,
+                                  [(end-self.facing*12, floor-8), (end, floor),
+                                   (end-self.facing*12, floor+8)], 3)
             if self.pattern == "proof_volley":
                 _dashed_line(surface,(152,74,66),(x,y-105),
                     (camera.screen_x(self.proof_target[0]),round(self.proof_target[1]+camera.offset_y)),2)
@@ -4140,10 +4202,13 @@ class FinalEditorBoss(AdvancedEnemy):
                     pygame.draw.lines(surface,(151,61,58),False,
                         [(lx-side*12,ly-10),(lx+side*5,ly),(lx-side*12,ly+10)],3)
         elif self.state == "proof_window":
-            pygame.draw.line(surface, RED_RULE, (x - 29, y - 173), (x - 64, y - 204), 4)
-            pygame.draw.line(surface, RED_RULE, (x + 29, y - 173), (x + 64, y - 204), 4)
-            renderer.doodle_text(surface, "OPEN PROOF", (x - 46, y - 226),
+            spread = 35 * min(1, self.state_time/.25) if self.vulnerable else 3
+            pygame.draw.line(surface, RED_RULE, (x - 29, y - 173), (x - 29-spread, y - 180-spread*.7), 4)
+            pygame.draw.line(surface, RED_RULE, (x + 29, y - 173), (x + 29+spread, y - 180-spread*.7), 4)
+            renderer.doodle_text(surface, "OPEN PROOF" if self.vulnerable else "CLIP SHUT",
+                                 (x - 46, y - 226),
                                  INK_LIGHT, renderer.font_small, -2)
+            self._draw_opening(surface, (x, y-160), 25)
         label = {"aggressive": "AGGRO", "avoidant": "BRAVEMAN",
                  "precise": "MIRROR", "unreadable": "MIXED"}.get(self.scenario, "READING")
         renderer.doodle_text(surface, label,
@@ -4353,7 +4418,7 @@ class ScissorDirector(AdvancedEnemy):
         progress = self.pose_progress
         warning = self.state.endswith("warn")
         angle = (.2 + .55 * math.sin(progress * math.pi / 2) if warning else
-                 .8 if self.state == "open_hinge" else
+                 .8 * min(1, self.state_time/.25) if self.state == "open_hinge" and self.vulnerable else
                  .58 if self.state == "cross_cut" else .16)
         cy = y - (20 if self.state == "shear" else 50)
         facing = self.facing
@@ -4393,8 +4458,9 @@ class ScissorDirector(AdvancedEnemy):
                     pygame.draw.line(surface, (143, 45, 49), screen_a, screen_b, 7)
                     pygame.draw.line(surface, (224, 198, 164), screen_a, screen_b, 2)
         if self.state == "open_hinge":
-            pygame.draw.circle(surface, (69, 99, 117), (x, cy), 19, 2)
-            renderer.doodle_text(surface, "HINGE OPEN", (x - 48, y - 156),
+            self._draw_opening(surface, (x, cy), 21)
+            renderer.doodle_text(surface, "HINGE OPEN" if self.vulnerable else "HINGE SHUT",
+                                 (x - 48, y - 132),
                                  (69, 99, 117), renderer.font_small, -2)
         renderer.doodle_text(surface, f"CUT {self.phase} / 3", (x - 36, y - 181),
                              RED_RULE, renderer.font_small, 1)
