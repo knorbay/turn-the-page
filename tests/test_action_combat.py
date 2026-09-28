@@ -35,6 +35,8 @@ from world import PaperWorld
 
 
 EXPECTED_ADVANCED_ENEMIES = {
+    "ticket_vulture", "satellite_sentry", "file_runner", "folder_glider", "carbon_stamper",
+    "fold_duelist", "margin_sniper", "split_lantern",
     "redaction_agent", "scissor_director",
     "ruler_guard",
     "paper_wasp",
@@ -172,6 +174,26 @@ class ActionCombatContracts(unittest.TestCase):
         for weapon_id, minimum in expected_minimums.items():
             self.assertGreaterEqual(weapons.weapons[weapon_id].fire_delay, minimum)
 
+    def test_chalk_capsule_arcs_into_cover_and_hits_a_small_group_once(self):
+        context = self.make_context(Player(250, 542))
+        weapons = WeaponSystem(context.player)
+        context.weapons = weapons
+        weapons.configure_page(1)
+        weapons.unlock("chalk_bomb")
+        self.assertTrue(weapons.select("chalk_bomb"))
+        targets = [SimpleNamespace(rect=pygame.Rect(x, 510, 40, 80), hp=3.0,
+                                   dead=False, active=True, vx=0, kind="test")
+                   for x in (560, 605, 810)]
+        self.assertTrue(weapons.handle_input(fire_pressed=True, aim=(600, 540), ctx=context))
+        self.assertEqual(weapons.weapons["chalk_bomb"].ammo, 1)
+        self.assertLess(weapons.projectiles[0].vy, 0)
+        for _ in range(90):
+            weapons.update(1 / 60, context, targets)
+        self.assertFalse(weapons.projectiles)
+        self.assertAlmostEqual(targets[0].hp, 2.15, places=2)
+        self.assertAlmostEqual(targets[1].hp, 2.15, places=2)
+        self.assertEqual(targets[2].hp, 3.0)
+
     def test_hit_stop_buffers_a_tapped_jump(self):
         with tempfile.TemporaryDirectory() as directory:
             game = Game(self.screen, os.path.join(directory, "buffer-save.json"))
@@ -215,9 +237,9 @@ class ActionCombatContracts(unittest.TestCase):
         for _ in range(24):
             weapons.update(1 / 60, context, [enemy])
 
-        self.assertTrue(enemy.dead)
-        self.assertEqual(enemy.hp, 0)
-        self.assertNotIn("paper_step", context.sounds.played)
+        self.assertFalse(enemy.dead)
+        self.assertAlmostEqual(enemy.hp, enemy.max_hp - 3 * .62)
+        self.assertNotIn("blocked", context.sounds.played)
 
     def test_marker_volley_only_deals_one_damage_to_a_real_boss(self):
         context = self.make_context(Player(330, 542))
@@ -346,7 +368,7 @@ class ActionCombatContracts(unittest.TestCase):
         """No entrance or exit corner may become a permanent AI safe pocket."""
         width = 1600
         legacy = ("crawler", "hopper", "spitter", "boss")
-        kinds = tuple(sorted(ENEMY_TYPES)) + legacy
+        kinds = tuple(sorted(set(ENEMY_TYPES)-{"fold_duelist", "margin_sniper", "split_lantern"})) + legacy + ("fold_duelist", "margin_sniper", "split_lantern")
         # CombatArena's entrance stroke is -80..-55 relative to start; the
         # exit stroke begins at width-22. These positions model the real two
         # corners, not merely the enemy-centre bounds.
@@ -484,7 +506,7 @@ class ActionCombatContracts(unittest.TestCase):
         pickup_values = list(pickup_catalog.items()) if isinstance(pickup_catalog, dict) else list(pickup_catalog)
         self.assertGreaterEqual(len(pickup_values), 4)
         pickup_text = repr(pickup_values).lower()
-        for required in WEAPON_ORDER[1:]:
+        for required in (tool for tool in WEAPON_ORDER[1:] if tool != "margin_maul"):
             self.assertIn(required, pickup_text)
 
 

@@ -44,8 +44,12 @@ class Player:
         self.current_weapon = "pencil_blade"
         self.aim_angle = 0.0
         self.weapon_recoil = 0.0
+        self.weapon_reload_progress = None
         self.combat_swing = None
         self.redraw_variant = "clean"
+        # Visual only.  The collision box remains stable while the Artist's
+        # rejected drawing buckles and is then redrawn at the checkpoint.
+        self.death_progress = 0.0
         self.page_style = "plain"
         # Animation follows distance travelled; collision and attack timing
         # remain owned by the controller and weapon system.
@@ -82,6 +86,21 @@ class Player:
     @property
     def center_x(self):
         return self.x + self.WIDTH / 2
+
+    def drop_through(self, world):
+        """Leave an elevated thin line deliberately, retaining the solid floor."""
+        if self.locked or not self.on_ground or self.health <= 0:
+            return False
+        for platform, one_way in world.collision_entries():
+            if (one_way and platform.top < 580 and platform.height <= 49
+                    and abs(platform.top-self.rect.bottom) <= 3
+                    and platform.left <= self.center_x <= platform.right):
+                self.y += platform.height + 8
+                self.vy = 110
+                self.on_ground = False
+                self.coyote = self.jump_buffer = 0
+                return True
+        return False
 
     def queue_jump(self):
         self.jump_buffer = .12
@@ -122,10 +141,13 @@ class Player:
     def dash_ready(self):
         return self.dash_cooldown <= 0
 
-    def set_weapon_pose(self, weapon_id, aim_angle=0.0, recoil=0.0):
+    def set_weapon_pose(self, weapon_id, aim_angle=0.0, recoil=0.0,
+                        reload_progress=None):
         self.current_weapon = str(weapon_id)
         self.aim_angle = float(aim_angle)
         self.weapon_recoil = max(self.weapon_recoil, float(recoil))
+        self.weapon_reload_progress = (None if reload_progress is None else
+                                       max(0.0, min(1.0, float(reload_progress))))
 
     def redraw_tip(self):
         """World-space endpoint of the currently active redraw stroke."""
@@ -146,7 +168,7 @@ class Player:
         shoulder, hip = pose["shoulder"], pose["hip"]
         arm = (shoulder[0], shoulder[1] + 7)
         swing = -math.sin(self.stride_phase) * 7 * self.motion_speed
-        left, right = (1.42, .78) if self.redraw_variant == "long_arm" else (1, 1)
+        left, right = (1.58, .72) if self.redraw_variant == "long_arm" else (1, 1)
         strokes = [
             (shoulder, hip, .16, .36, 3),
             (arm, (arm[0] + swing*left, arm[1] + 14*left), .32, .52, 2),
@@ -292,11 +314,13 @@ class Player:
         facing, speed = self.facing, self.motion_speed
         squash = self.land_squash
         stretch = 1.0 - squash
-        leg_scale = 1.22 if self.redraw_variant == "long_leg" else .92 if self.redraw_variant == "rushed" else 1.0
+        leg_scale = 1.42 if self.redraw_variant == "long_leg" else .79 if self.redraw_variant == "rushed" else 1.0
         hip_y = bottom - 16 * stretch * leg_scale
-        shoulder_y = hip_y - (22 if self.redraw_variant == "rushed" else 24) * stretch
+        shoulder_y = hip_y - (19 if self.redraw_variant == "rushed" else 24) * stretch
         hip_x = cx
         lean = facing * speed * 4 if self.on_ground else max(-4, min(4, self.vx / 70))
+        if self.on_ground and speed < .08 and not self.dashing:
+            shoulder_y += math.sin(self.anim_time * 2.4) * .8
         legs = []
         if self.on_ground:
             bob = abs(math.sin(self.stride_phase)) * speed * 1.8
@@ -352,10 +376,22 @@ class Player:
             if self.on_ground:
                 legs = [((cx+facing*8, hip_y+8), (cx+facing*stance, bottom)),
                         ((cx-facing*8, hip_y+7), (cx-facing*(stance-3), bottom))]
+        elif self.draw_amount >= 1 and self.current_weapon not in ("pencil_blade", "margin_maul"):
+            shape = profile_for(getattr(self, "arsenal_page", None), self.current_weapon).silhouette
+            heavy = shape in ("marker", "double_barrel", "breach", "eraser", "null_cannon", "carbon_rifle")
+            if self.weapon_reload_progress is not None:
+                shoulder_y += 3
+                lean -= facing * 3
+            elif self.weapon_recoil > .04:
+                lean -= facing * self.weapon_recoil * (10 if heavy else 5)
+                shoulder_y += self.weapon_recoil * (2 if heavy else 1)
+            if heavy and self.on_ground:
+                legs = [((cx+facing*8, hip_y+7), (cx+facing*15, bottom)),
+                        ((cx-facing*8, hip_y+8), (cx-facing*13, bottom))]
 
         shoulder = (hip_x + lean, shoulder_y)
-        head_x = shoulder[0] + (4*facing if self.redraw_variant == "crooked_head" else
-                                -2 if self.redraw_variant == "rushed" else 0)
+        head_x = shoulder[0] + (10*facing if self.redraw_variant == "crooked_head" else
+                                -5*facing if self.redraw_variant == "rushed" else 0)
         if self.dashing:
             head_x += facing * 3
         head = (head_x, shoulder_y - 9*stretch)
@@ -440,6 +476,9 @@ class Player:
 
     def draw(self, surface, camera):
         self._draw_dash_impressions(surface, camera)
+        if self.death_progress > 0:
+            self._draw_broken_draft(surface, camera)
+            return
         cx = camera.screen_x(self.center_x)
         pose = self._body_pose()
         def screen(point):
@@ -457,15 +496,21 @@ class Player:
                 return
             target = (round(start[0] + (end[0] - start[0]) * progress),
                       round(start[1] + (end[1] - start[1]) * progress))
-            pygame.draw.line(surface, ink, (round(start[0]), round(start[1])), target, width)
+            from paper_renderer import jitter_line
+            jitter_line(surface, ink, (round(start[0]), round(start[1])), target, width,
+                        round(begin*1000), 2, 1.3)
 
         # One ordered stroke plan is shared by the opening and every redraw.
         head_progress = max(0.0, min(1.0, self.draw_amount / .20))
         if head_progress > 0:
             head_rect = pygame.Rect(round(head_x - head_r), round(head_y - head_r),
                                     head_r * 2, head_r * 2)
-            pygame.draw.arc(surface, ink, head_rect, -math.pi / 2,
-                            -math.pi / 2 + math.tau * head_progress, 2)
+            if head_progress >= 1:
+                from sketch_marks import rough_circle
+                rough_circle(surface, ink, (head_x,head_y),head_r,441,2,2,wobble=1.6)
+            else:
+                pygame.draw.arc(surface, ink, head_rect, -math.pi / 2,
+                                -math.pi / 2 + math.tau * head_progress, 2)
         for start, end, begin, finish, width in self._redraw_strokes(pose):
             if width == 2 and self.draw_amount >= .82:
                 continue
@@ -483,7 +528,11 @@ class Player:
             pygame.draw.line(surface, ink, (round(head_x + self.facing * 3), round(head_y + look_y)),
                              (round(head_x + self.facing * 6), round(head_y + look_y)), 1)
         self._draw_page_costume(surface, head_x, head_y, shoulder_y, hip_y, ink)
-        if self.attack_timer > 0 and self.draw_amount >= .8:
+        if self.combat_swing is not None and self.draw_amount >= .8:
+            self._draw_melee_motion(surface, camera, cx)
+        elif self.attack_timer > 0 and self.draw_amount >= .8:
+            # The old standalone Player.attack path is still used by a few
+            # scripted encounters. Real weapons use the stroke below instead.
             reach = 42 * self.facing
             start = (cx + self.facing * 7, round(shoulder_y + 9))
             end = (cx + reach, round(shoulder_y + 2 + math.sin(self.attack_timer * 28) * 8))
@@ -503,6 +552,159 @@ class Player:
                 pygame.draw.line(surface, (fade, fade - 3, fade - 8),
                                  (cx - offset, round(shoulder_y + 4 + index * 5)),
                                  (cx - offset - self.facing * 19, round(shoulder_y + 4 + index * 5)), 1)
+
+    def _draw_melee_motion(self, surface, camera, cx):
+        """Draw the *kind* of cut around the real weapon tip, not a generic arc.
+
+        This is a visual layer over the existing MeleeSwing timing and hitbox.
+        A few opaque graphite strokes are deliberately used instead of a
+        translucent screen-sized layer: the marks stay crisp on macOS too.
+        """
+        angle, reach, power = self.combat_swing
+        force = min(1.0, max(0.0, power))
+        if force < .08:
+            return
+        profile = profile_for(getattr(self, "arsenal_page", None),
+                              self.current_weapon)
+        shape, accent = profile.silhouette, profile.accent
+        origin = pygame.Vector2(cx, self.rect.centery - 5 + camera.offset_y)
+        direction = pygame.Vector2(math.cos(angle), math.sin(angle))
+        normal = pygame.Vector2(-direction.y, direction.x)
+        tip = origin + direction * reach
+        graphite = (58, 54, 52)
+        faded = (166, 158, 145)
+        from paper_renderer import jitter_line
+
+        def point(value):
+            return round(value.x), round(value.y)
+
+        def stroke(a, b, color=graphite, width=2, seed=591):
+            jitter_line(surface, color, point(a), point(b), width,
+                        seed, 2, .8)
+
+        if shape == "katana":
+            # A long single sweep and its light pressure ghost.
+            for radius, color, width in ((reach, accent, 3),
+                                         (reach - 9, faded, 1)):
+                path = [origin + pygame.Vector2(math.cos(angle + offset),
+                                                 math.sin(angle + offset)) * radius
+                        for offset in (-.36, -.22, -.08, .06, .19)]
+                for index in range(len(path) - 1):
+                    stroke(path[index], path[index + 1], color, width, 592 + index)
+            stroke(tip - normal * 9, tip + normal * 9, graphite, 2, 598)
+        elif shape == "bowie":
+            # A short, weighty cross-cut close to the fist.
+            start = origin + direction * (reach * .43) - normal * 16
+            middle = tip + normal * 7
+            stroke(start, middle, graphite, 4, 601)
+            stroke(start + direction * 9 + normal * 11,
+                   tip + normal * 17, accent, 2, 602)
+            stroke(tip - direction * 12 - normal * 10,
+                   tip + direction * 5 + normal * 4, faded, 2, 603)
+        elif shape == "field_knife":
+            # Three narrow puncture trails remain distinct from a broad sword.
+            for index, side in enumerate((-9, 0, 9)):
+                start = origin + direction * (reach * (.47 + .07 * index)) + normal * side
+                end = tip + direction * (4 if index == 1 else 0) + normal * (side * .55)
+                stroke(start, end, accent if index == 1 else graphite,
+                       2 if index == 1 else 1, 608 + index)
+            pygame.draw.circle(surface, graphite, point(tip + direction * 6), 2)
+        elif shape == "ion_blade":
+            # Blue doubled charge with a jagged lead, in the same pencil world.
+            for side in (-7, 7):
+                stroke(origin + direction * (reach * .56) + normal * side,
+                       tip + normal * (side * .55), accent, 2, 612 + side)
+            spark = [tip - direction * 9 - normal * 7,
+                     tip - direction * 2 + normal * 5,
+                     tip + direction * 8 - normal * 3,
+                     tip + direction * 13 + normal * 4]
+            for index in range(3):
+                stroke(spark[index], spark[index + 1], graphite, 2, 620 + index)
+        elif shape == "redraw_pencil":
+            # Misregistered correction stroke foreshadows the delayed echo.
+            for side, color in ((-10, faded), (5, accent)):
+                stroke(origin + direction * (reach * .38) + normal * side,
+                       tip + normal * side, color, 2, 626 + side)
+            for center in (tip - direction * 18, tip + direction * 4):
+                stroke(center - normal * 6, center + normal * 6, accent, 1, 640)
+        elif shape == "pencil_maul":
+            # The oversized point drags a broad graphite wedge and splinters.
+            near = origin + direction * (reach * .61)
+            pygame.draw.polygon(surface, (191, 174, 137),
+                                [point(near - normal * 10), point(tip + normal * 13),
+                                 point(tip - normal * 13)])
+            stroke(near - normal * 10, tip + normal * 13, graphite, 3, 645)
+            stroke(near + normal * 9, tip - normal * 13, graphite, 3, 646)
+            for index, side in enumerate((-16, 0, 16)):
+                stroke(tip + normal * side,
+                       tip + normal * side + direction * (8 + index * 4),
+                       faded, 2, 648 + index)
+        else:
+            # Original pencil blade keeps a handmade graphite slash.
+            stroke(origin + direction * (reach * .58) - normal * 10,
+                   tip + normal * 10, graphite, 3, 653)
+            stroke(origin + direction * (reach * .67) + normal * 2,
+                   tip + normal * 16, faded, 1, 654)
+
+    def _draw_broken_draft(self, surface, camera):
+        """The dying figure visibly folds into a rejected, detached sketch.
+
+        This changes only pixels.  The same normal pose drives the remnant and
+        the death overlay, so it remains attached to the point of impact.
+        """
+        from paper_renderer import jitter_line
+        from sketch_marks import rough_circle
+
+        p = min(1.0, max(0.0, self.death_progress))
+        pose = self._body_pose()
+        facing = self.facing
+        def screen(point):
+            return (round(camera.screen_x(point[0])), round(point[1] + camera.offset_y))
+        shoulder = screen(pose["shoulder"])
+        hip = screen(pose["hip"])
+        head = screen(pose["head"])
+        displaced_head = (round(head[0] + facing * 23 * p), round(head[1] - 12 * p))
+        bent_shoulder = (round(shoulder[0] - facing * 13 * p),
+                         round(shoulder[1] + 8 * p))
+        bent_hip = (round(hip[0] + facing * 9 * p), round(hip[1] + 6 * p))
+        faint = (185, 178, 166)
+        ink = (73 + round(p * 83), 68 + round(p * 75), 65 + round(p * 69))
+        red = (149, 68, 66)
+
+        # The previous, correct stroke remains like a rubbed-out afterimage.
+        rough_circle(surface, faint, head, pose["radius"], 453, 1, 1, wobble=2)
+        jitter_line(surface, faint, shoulder, hip, 1, 454, 1, 1.4)
+        rough_circle(surface, ink, displaced_head, pose["radius"], 455, 2, 2, wobble=2.2)
+        jitter_line(surface, ink, bent_shoulder, bent_hip, 3, 456, 2, 2.2)
+        pygame.draw.line(surface, red,
+                         (displaced_head[0] - 4, displaced_head[1] - 3),
+                         (displaced_head[0] + 5, displaced_head[1] + 4), 2)
+        pygame.draw.line(surface, red,
+                         (displaced_head[0] - 3, displaced_head[1] + 4),
+                         (displaced_head[0] + 5, displaced_head[1] - 3), 2)
+        for index, (knee, foot) in enumerate(pose["legs"]):
+            sknee, sfoot = screen(knee), screen(foot)
+            gap = facing * (6 + index * 5) * p
+            knee_end = (round(sknee[0] - gap), round(sknee[1] - p * 3))
+            foot_start = (round(sknee[0] + gap), round(sknee[1] + p * 3))
+            jitter_line(surface, ink, bent_hip, knee_end, 2, 460 + index, 2, 2)
+            jitter_line(surface, ink, foot_start,
+                        (round(sfoot[0] + facing * (index * 7 - 4) * p),
+                         round(sfoot[1] - (index + 1) * p * 4)),
+                        2, 464 + index, 2, 2)
+        for index, direction in enumerate((-1, 1)):
+            arm_start = (round(bent_shoulder[0] + direction * 4), bent_shoulder[1] + 5)
+            arm_end = (round(arm_start[0] + direction * (12 + 11 * p)),
+                       round(arm_start[1] + 12 + (index * 8 - 3) * p))
+            jitter_line(surface, ink, arm_start, arm_end, 2, 468 + index, 2, 2)
+        # The rejection crosses the misdrawn pose rather than the entire view.
+        if p > .38:
+            slash = min(1.0, (p - .38) / .4)
+            length = round(24 * slash)
+            jitter_line(surface, red,
+                        (bent_hip[0] - length, bent_hip[1] + 11),
+                        (bent_hip[0] + length, bent_shoulder[1] - 16),
+                        2, 471, 2, 1.8)
 
     def _draw_page_costume(self, surface, head_x, head_y, shoulder_y, hip_y, ink):
         if self.draw_amount < .82:
@@ -586,14 +788,14 @@ class Player:
     def _draw_weapon_and_hands(self, surface, cx, shoulder_y, hip_y, ink, combat_y,
                                combat_x=None):
         """Small grips keep the stick-figure hands readable during combat."""
-        if self.current_weapon == "pencil_blade" and self.combat_swing is not None:
+        if self.current_weapon in ("pencil_blade", "margin_maul") and self.combat_swing is not None:
             angle, reach, power = self.combat_swing
             vector=pygame.Vector2(math.cos(angle),math.sin(angle))
             normal=pygame.Vector2(-vector.y,vector.x)
             origin=pygame.Vector2(cx if combat_x is None else combat_x,combat_y)
             hand=origin+vector*13
             page = getattr(self, "arsenal_page", None)
-            shape = profile_for(page, "pencil_blade").silhouette
+            shape = profile_for(page, self.current_weapon).silhouette
             close_grip = shape in ("bowie", "field_knife")
             elbow=pygame.Vector2(cx+self.facing*(5 if close_grip else -3),shoulder_y+17)
             pygame.draw.lines(surface,ink,False,[(cx,shoulder_y+7),elbow,hand],2)
@@ -603,78 +805,97 @@ class Player:
             pygame.draw.lines(surface,ink,False,
                 [(cx,shoulder_y+10),(cx-self.facing*8,shoulder_y+19),support],2)
             length = {"katana":47, "bowie":27, "field_knife":24,
-                      "ion_blade":43, "pencil":40, "redraw_pencil":44}.get(shape, 40)
-            draw_weapon(surface, "pencil_blade", page, hand, angle,
+                      "ion_blade":43, "pencil":40, "redraw_pencil":44, "pencil_maul":93}.get(shape, 40)
+            draw_weapon(surface, self.current_weapon, page, hand, angle,
                         scale=max(.55, (reach - 13) / length), ink=ink)
             pygame.draw.circle(surface,ink,hand,3,1)
             return
-        # Vertical aim is the sine for both facings. Clamping atan2 made a
-        # horizontal left shot point the drawn muzzle down by 19 pixels.
-        angle = math.sin(self.aim_angle)
+        weapon = self.current_weapon
+        page = getattr(self, "arsenal_page", None)
+        profile = profile_for(page, weapon)
+        shape = profile.silhouette
         direction = self.facing
         recoil = self.weapon_recoil
-        hand_x = cx + direction * (15 - recoil * 8)
-        hand_y = round(shoulder_y + 10 + angle * 7 - recoil*3)
-        support_x = cx + direction * 8
-        support_y = round(shoulder_y + 17)
-        pygame.draw.line(surface, ink, (cx, round(shoulder_y + 7)), (hand_x, hand_y), 2)
-        pygame.draw.line(surface, ink, (cx, round(shoulder_y + 10)), (support_x, support_y), 2)
-        pygame.draw.circle(surface, ink, (hand_x, hand_y), 3, 1)
-        pygame.draw.circle(surface, ink, (support_x, support_y), 2, 1)
+        reloading = self.weapon_reload_progress is not None
+        idle = math.sin(self.anim_time * 3.1) * .9 if self.motion_speed < .25 else 0
 
-        weapon = self.current_weapon
-        if weapon != "excalibur" and weapon != "ink_brush":
-            page = getattr(self, "arsenal_page", None)
-            held_angle = self.aim_angle - direction * recoil * .12
-            if weapon == "pencil_blade":
-                # The idle pose previews each starter's handling before the
-                # first hit: sheathed katana, close Bowie, floating ion edge,
-                # reverse-grip field knife, and the final page's writing grip.
-                shape = profile_for(page, weapon).silhouette
-                carry = {
-                    "katana": .28,
-                    "bowie": -.22,
-                    "ion_blade": .04,
-                    "field_knife": 1.02,
-                    "redraw_pencil": .70,
-                }.get(shape, .60)
+        if shape == "chalk_bomb":
+            hand_x, hand_y = cx + direction * 12, round(shoulder_y - 11 + idle)
+            support_x, support_y = cx - direction * 5, round(shoulder_y + 17)
+        elif shape == "fold_star":
+            hand_x, hand_y = cx + direction * 20, round(shoulder_y + 5 + idle)
+            support_x, support_y = cx - direction * 5, round(shoulder_y + 17)
+        elif shape in ("carbon_rifle", "marker", "double_barrel", "breach",
+                       "eraser", "null_cannon", "pulse"):
+            hand_x = cx + direction * (9 - recoil * 9)
+            hand_y = round(shoulder_y + 11 + math.sin(self.aim_angle) * 5 + idle)
+            support_x, support_y = hand_x + direction * 20, hand_y + 1
+        elif shape in ("revolver", "ink_pistol", "suppressed"):
+            hand_x = cx + direction * (18 - recoil * 7)
+            hand_y = round(shoulder_y + 7 + math.sin(self.aim_angle) * 7 + idle)
+            support_x, support_y = cx - direction * 5, round(shoulder_y + 19)
+        else:
+            hand_x = cx + direction * (13 - recoil * 6)
+            hand_y = round(shoulder_y + 12 + idle)
+            support_x, support_y = cx - direction * 6, round(shoulder_y + 18)
+
+        if reloading:
+            # Lower the tool for a deliberate magazine/capsule replacement.
+            hand_x -= direction * 5
+            hand_y += 7
+            support_x = hand_x - direction * 8
+            support_y = hand_y + 13
+        shoulder = (round(cx), round(shoulder_y + 7))
+        pygame.draw.lines(surface, ink, False,
+                          [shoulder, (round(cx + direction * 5), round(shoulder_y + 12)),
+                           (round(hand_x), round(hand_y))], 2)
+        pygame.draw.lines(surface, ink, False,
+                          [(round(cx), round(shoulder_y + 10)),
+                           (round(cx - direction * 8), round(shoulder_y + 17)),
+                           (round(support_x), round(support_y))], 2)
+
+        if weapon == "ink_brush":
+            tip = (round(hand_x + direction * 45), round(hand_y - 4))
+            pygame.draw.line(surface, (94, 62, 42), (hand_x, hand_y), tip, 5)
+            pygame.draw.circle(surface, (24, 26, 34), tip, 7)
+        else:
+            held_angle = self.aim_angle - direction * recoil * .22
+            scale = 1.12 if shape in ("revolver", "ink_pistol", "suppressed",
+                                      "double_barrel", "breach", "marker") else 1.0
+            if shape in ("pencil", "katana", "bowie", "field_knife", "ion_blade",
+                         "redraw_pencil", "excalibur", "pencil_maul"):
+                carry = {"katana": .25, "bowie": -.28, "field_knife": 1.15,
+                         "ion_blade": -.08, "redraw_pencil": .72,
+                         "excalibur": -.88, "pencil_maul": -1.12}.get(shape, .58)
                 held_angle = carry if direction > 0 else math.pi - carry
-            draw_weapon(surface, weapon, page, (hand_x, hand_y), held_angle, ink=ink)
-            return
-        muzzle_x = hand_x + direction * 30
-        muzzle_y = hand_y + round(angle * 12 - recoil*5)
-        if weapon == "pencil_blade":
-            pygame.draw.line(surface, (67, 62, 55), (hand_x, hand_y), (muzzle_x + direction * 10, muzzle_y), 4)
-            pygame.draw.line(surface, (213, 151, 48), (hand_x, hand_y - 1), (muzzle_x, muzzle_y - 1), 2)
-        elif weapon == "ink_pistol":
-            pygame.draw.line(surface, (34, 35, 42), (hand_x, hand_y), (muzzle_x, muzzle_y), 6)
-            pygame.draw.line(surface, ink, (hand_x + direction * 7, hand_y + 2),
-                             (hand_x + direction * 4, hand_y + 12), 4)
-        elif weapon == "marker_shotgun":
-            pygame.draw.line(surface, (45, 43, 48), (support_x, support_y), (muzzle_x + direction * 8, muzzle_y), 9)
-            pygame.draw.line(surface, (113, 62, 103), (hand_x, hand_y - 2),
-                             (muzzle_x + direction * 8, muzzle_y - 2), 3)
-        elif weapon == "eraser_cannon":
-            body = pygame.Rect(0, 0, 38, 15)
-            body.center = ((hand_x + muzzle_x) // 2, (hand_y + muzzle_y) // 2)
-            pygame.draw.rect(surface, (218, 155, 153), body, border_radius=3)
-            pygame.draw.rect(surface, ink, body, 2, border_radius=3)
-        elif weapon == "rubber_band":
-            pygame.draw.line(surface, ink, (hand_x, hand_y - 8), (hand_x, hand_y + 8), 3)
-            pygame.draw.line(surface, (157, 92, 61), (hand_x, hand_y - 7), (muzzle_x, muzzle_y), 2)
-            pygame.draw.line(surface, (157, 92, 61), (hand_x, hand_y + 7), (muzzle_x, muzzle_y), 2)
-        elif weapon == "ink_brush":
-            pygame.draw.line(surface, (94, 62, 42), (support_x, support_y),
-                             (muzzle_x + direction * 9, muzzle_y), 5)
-            pygame.draw.circle(surface, (24, 26, 34), (muzzle_x + direction * 12, muzzle_y), 7)
-        elif weapon == "excalibur":
-            tip_x = muzzle_x + direction * 28
-            tip_y = muzzle_y - 6
-            pygame.draw.line(surface, (49, 50, 57), (hand_x, hand_y),
-                             (tip_x, tip_y), 7)
-            pygame.draw.line(surface, (228, 202, 109),
-                             (hand_x + direction * 4, hand_y - 2),
-                             (tip_x, tip_y - 2), 2)
-            pygame.draw.line(surface, (141, 55, 56),
-                             (hand_x - direction * 5, hand_y - 8),
-                             (hand_x + direction * 9, hand_y + 8), 4)
+                if recoil > 0:
+                    held_angle -= direction * recoil * .18
+            elif shape == "fold_star":
+                held_angle = self.anim_time * 2.8
+            elif shape == "rubber":
+                held_angle = -.35 if direction > 0 else math.pi + .35
+            elif shape == "chalk_bomb":
+                held_angle = self.anim_time * .45
+            if reloading:
+                held_angle = -.85 if direction > 0 else math.pi + .85
+            draw_weapon(surface, weapon, page, (hand_x, hand_y), held_angle,
+                        scale=scale, ink=ink)
+
+        pygame.draw.circle(surface, ink, (round(hand_x), round(hand_y)), 3, 1)
+        pygame.draw.circle(surface, ink, (round(support_x), round(support_y)), 2, 1)
+        if reloading:
+            progress = self.weapon_reload_progress
+            # The second hand and displaced insert make reloading legible at
+            # the tiny player scale even without a separate sprite sheet.
+            insert_y = round(support_y + 4 + math.sin(progress * math.pi) * 5)
+            if shape == "revolver":
+                pygame.draw.circle(surface, profile.accent,
+                                   (round(support_x), insert_y), 5, 2)
+            elif shape == "chalk_bomb":
+                pygame.draw.circle(surface, profile.accent,
+                                   (round(support_x), insert_y), 5, 2)
+            else:
+                pygame.draw.rect(surface, profile.accent,
+                                 (round(support_x)-3, insert_y-3, 7, 9), 2)
+            pygame.draw.line(surface, ink, (round(support_x), round(support_y)),
+                             (round(support_x), insert_y), 1)

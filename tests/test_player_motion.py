@@ -99,6 +99,49 @@ class PlayerMotionContracts(unittest.TestCase):
             for attribute in ("x", "y", "vx", "vy", "on_ground", "health", "dash_timer"):
                 self.assertEqual(getattr(self.player, attribute), getattr(other, attribute))
 
+    def test_weapon_reload_and_recoil_poses_are_visible_without_moving_hitbox(self):
+        camera = Camera(300)
+        for page, weapon in ((1, "ink_pistol"), (1, "marker_shotgun"),
+                             (2, "eraser_cannon"), (3, "carbon_lance"),
+                             (1, "chalk_bomb")):
+            with self.subTest(weapon=weapon):
+                player = Player(100, 100)
+                player.on_ground = True
+                player.arsenal_page = page
+                original_rect = player.rect.copy()
+                frames = []
+                for recoil, reload_progress in ((0, None), (.7, None), (0, .5)):
+                    player.weapon_recoil = 0
+                    player.set_weapon_pose(weapon, 0, recoil, reload_progress)
+                    surface = pygame.Surface((300, 220))
+                    surface.fill((245, 237, 216))
+                    player.draw(surface, camera)
+                    frames.append(pygame.image.tobytes(surface, "RGB"))
+                    self.assertEqual(player.rect, original_rect)
+                self.assertEqual(len(set(frames)), 3)
+
+    def test_page_blades_have_distinct_active_strokes_without_changing_collision(self):
+        camera = Camera(240)
+        images = []
+        for page, weapon in ((0, "pencil_blade"), (1, "pencil_blade"),
+                             (2, "pencil_blade"), (3, "pencil_blade"),
+                             (4, "pencil_blade"), (0, "margin_maul")):
+            with self.subTest(page=page, weapon=weapon):
+                player = Player(80, 40)
+                player.arsenal_page = page
+                player.current_weapon = weapon
+                player.combat_swing = (-.35, 70, .9)
+                collision = player.rect.copy()
+                active = pygame.Surface((240, 140), pygame.SRCALPHA)
+                player._draw_melee_motion(active, camera, 92)
+                images.append(pygame.image.tobytes(active, "RGBA"))
+                self.assertEqual(player.rect, collision)
+                player.combat_swing = (-.35, 70, 0)
+                resting = pygame.Surface((240, 140), pygame.SRCALPHA)
+                player._draw_melee_motion(resting, camera, 92)
+                self.assertEqual(resting.get_bounding_rect().size, (0, 0))
+        self.assertEqual(len(set(images)), len(images))
+
     def test_redraw_pencil_reaches_the_visible_articulated_leg(self):
         for variant in ("clean", "long_leg", "long_arm", "rushed", "crooked_head"):
             self.player.redraw_variant = variant

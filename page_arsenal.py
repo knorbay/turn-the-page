@@ -35,6 +35,17 @@ class ToolProfile:
 
 
 ORIGINAL = {
+    "chalk_bomb": ToolProfile("CHALK CAPSULE", "chalk_bomb",
+                              "lob two capsules · small paper burst", 2, 1.95, .78,
+                              440, 760, .85, lifetime=1.7, knockback=115,
+                              accent=(124, 112, 89)),
+    "carbon_lance": ToolProfile("CARBON RIFLE", "carbon_rifle",
+                               "one round · pierces a line · long reload", 1, 1.8, 1.0,
+                               1120, 0, 1.8, pierce=3, recoil=145),
+    "folded_shuriken": ToolProfile("RETURNING FOLD", "fold_star",
+                                  "one fold at a time · catch the return line", fire_delay=.85),
+    "margin_maul": ToolProfile("OVERSIZED PENCIL", "pencil_maul",
+                               "wind up · crush · erase shots in reach", fire_delay=1.05),
     "pencil_blade": ToolProfile("PENCIL BLADE", "pencil", "three strokes · heavy finish"),
     "ink_pistol": ToolProfile("INK PISTOL", "ink_pistol", "steady ink fire", 9, 1.22, .30,
                              650, 35, 1.0),
@@ -55,15 +66,21 @@ PAGE_TOOLS = {
                                    fire_delay=.32, reach_scale=1.18, tempo=1.0, accent=(155, 56, 54)),
     },
     1: {
+        "chalk_bomb": ToolProfile("CHALK CAPSULE", "chalk_bomb",
+                                  "arc over cover · two gentle bursts", 2, 1.95, .78,
+                                  440, 760, .85, accent=(142, 91, 57)),
         "pencil_blade": ToolProfile("BOWIE KNIFE", "bowie", "stay close · mark twice · cash out",
                                    fire_delay=.27, reach_scale=.88, tempo=.88, damage=1.0, accent=(142, 91, 57)),
         "ink_pistol": ToolProfile("SIX-SHOOTER", "revolver", "six heavy shots · deliberate rhythm",
                                  6, 1.56, .42, 820, 0, 1.20, lifetime=1.15, knockback=145, recoil=18),
         "marker_shotgun": ToolProfile("DOUBLE BARREL", "double_barrel", "two quick blasts · wide spread",
-                                     2, 1.66, .60, 590, 50, .56, spread=36, pellets=9, lifetime=.47,
+                                     2, 1.66, .60, 590, 50, .50, spread=36, pellets=9, lifetime=.47,
                                      knockback=190, recoil=150, accent=(142, 91, 57)),
     },
     2: {
+        "chalk_bomb": ToolProfile("METEOR CHALK", "chalk_bomb",
+                                  "arc around shields · small impact cloud", 2, 1.95, .78,
+                                  440, 760, .85, accent=(63, 111, 139)),
         "pencil_blade": ToolProfile("ION EDGE", "ion_blade", "third cut fires a piercing wave",
                                    fire_delay=.31, reach_scale=1.22, tempo=.96, accent=(63, 111, 139)),
         "rubber_band": ToolProfile("ORBIT PULSE", "pulse", "three ricochets · bank off ink",
@@ -78,10 +95,10 @@ PAGE_TOOLS = {
                                    fire_delay=.18, reach_scale=.82, tempo=.80, damage=.95,
                                    accent=(76, 104, 92)),
         "ink_pistol": ToolProfile("SUPPRESSED PISTOL", "suppressed", "quick, precise fire · light recoil",
-                                 9, 1.12, .24, 960, 0, .95, lifetime=.95, knockback=75,
+                                 8, 1.32, .29, 960, 0, .85, lifetime=.95, knockback=75,
                                  accent=(76, 104, 92)),
         "marker_shotgun": ToolProfile("BREACH SHOTGUN", "breach", "tight grouping · controlled shove",
-                                     3, 1.85, .90, 720, 25, .85, spread=13, pellets=5, lifetime=.49,
+                                     3, 1.85, .90, 720, 25, .65, spread=13, pellets=5, lifetime=.49,
                                      knockback=175, recoil=85, accent=(76, 104, 92)),
     },
     4: {
@@ -121,7 +138,10 @@ def draw_weapon(surface, weapon_id, page_index, grip, angle=0.0, scale=1.0, ink=
         y *= flip_y
         return round(grip[0] + (x*c-y*s)*scale), round(grip[1] + (x*s+y*c)*scale)
     def line(points, color=dark, width=2):
-        pygame.draw.lines(surface, color, False, [pt(*p) for p in points], max(1, round(width*scale)))
+        from paper_renderer import jitter_line
+        for i in range(len(points)-1):
+            jitter_line(surface,color,pt(*points[i]),pt(*points[i+1]),
+                        max(1,round(width*scale)),419+i,2,.9*scale)
     def poly(points, fill=paper, outline=dark, width=1):
         points = [pt(*p) for p in points]
         if fill is not None:
@@ -131,6 +151,42 @@ def draw_weapon(surface, weapon_id, page_index, grip, angle=0.0, scale=1.0, ink=
     def circle(x, y, radius, color=dark, width=1):
         pygame.draw.circle(surface, color, pt(x,y), max(1,round(radius*scale)),
                            min(max(1,round(radius*scale)), max(1,round(width*scale))) if width else 0)
+
+    if shape == "carbon_rifle":
+        # A long, braced drafting rifle, not another pistol-sized rectangle.
+        poly([(-33,-11),(-15,-11),(-7,-3),(-7,5),(-25,12),(-34,7)], (149,137,117))
+        poly([(-20,-8),(30,-8),(35,-5),(67,-5),(70,-2),(67,1),(31,1),(18,7),(-20,7)],
+             (78,82,78))
+        poly([(27,-13),(37,-13),(42,-8),(27,-8)], paper)
+        line([(-17,-4),(26,-4),(67,-2)], (221,211,189), 2)
+        line([(41,-6),(41,3),(47,3),(47,-6)], accent, 2)
+        poly([(2,6),(17,6),(10,22),(1,20)], (112,105,91))
+        for x in (19,23,27): line([(x,2),(x+2,7)], paper, 1)
+        return
+    if shape == "fold_star":
+        points=[(0,-22),(5,-6),(23,0),(6,5),(0,22),(-5,6),(-22,0),(-6,-5)]
+        poly(points, paper, dark, 2)
+        for x,y in ((0,-22),(23,0),(0,22),(-22,0)):
+            line([(0,0),(x,y)], accent, 1)
+        circle(0,0,3,dark)
+        return
+    if shape == "chalk_bomb":
+        # Broken chalk is contained in a squat hand-labelled paper capsule.
+        poly([(-13,-10),(-9,-15),(9,-15),(14,-9),(14,8),(9,14),(-9,14),(-14,8)], paper, dark, 2)
+        poly([(-5,-15),(6,-15),(6,-22),(-5,-22)], (204,180,139))
+        line([(-10,-4),(10,-4)], accent, 3)
+        line([(-8,1),(7,1)], accent, 2)
+        for x,y in ((-7,7),(1,6),(8,8)): circle(x,y,2,light,1)
+        return
+    if shape == "pencil_maul":
+        poly([(-16,-5),(72,-5),(93,0),(72,6),(-16,6)], (208,189,129))
+        line([(-12,-2),(71,-2)],dark,2)
+        line([(-12,3),(71,3)],accent,1)
+        poly([(72,-5),(93,0),(72,6)],(178,151,112))
+        poly([(84,-2),(93,0),(84,3)],dark)
+        poly([(-22,-6),(-12,-6),(-12,7),(-22,7)],(180,117,111))
+        for x in range(-5,65,7):line([(x,-5),(x+4,5)],light,1)
+        return
 
     if shape in ("katana", "bowie", "field_knife", "ion_blade", "pencil",
                  "redraw_pencil", "excalibur"):
@@ -153,22 +209,30 @@ def draw_weapon(surface, weapon_id, page_index, grip, angle=0.0, scale=1.0, ink=
             for x in (-9,-5,-1):
                 line([(x,-3),(x+3,3)], accent, 1)
             if shape == "katana":
-                poly([(5,-2),(31,-3),(length,-8),(length-3,-2),(29,2),(5,3)], paper)
-                line([(8,0),(29,-1),(44,-5)], light,1)
-                line([(3,-7),(5,7)], accent,2)
+                poly([(5,-2),(30,-3),(43,-8),(length,-11),(length-2,-5),
+                      (31,2),(5,3)], (230,226,208))
+                line([(9,0),(29,-1),(44,-7)], (119,112,101),1)
+                line([(3,-9),(5,9)], accent,3)
+                line([(0,-7),(3,-7)], paper,1)
             elif shape == "bowie":
-                poly([(4,-4),(length-9,-4),(length,-1),(length-4,5),(4,5)], (211,212,202))
+                poly([(4,-5),(length-10,-5),(length-8,-1),(length,-4),
+                      (length-3,5),(4,5)], (207,209,196))
                 line([(7,3),(length-5,3)], light,1)
-                line([(3,-6),(3,7)], dark,2)
+                line([(3,-9),(3,8)], dark,3)
+                line([(3,8),(7,8)], accent,2)
             elif shape == "field_knife":
-                poly([(4,-3),(length-6,-3),(length,0),(length-5,3),(4,3)], (155,163,154))
+                poly([(4,-4),(length-10,-5),(length-4,-3),(length,0),
+                      (length-7,4),(4,4)], (155,163,154))
                 for x in range(5,14,3):
                     line([(x,-3),(x+1,-1)],dark,1)
                 line([(3,-6),(3,5)], accent,2)
             elif shape == "ion_blade":
-                poly([(3,-4),(length-6,-3),(length,0),(length-6,3),(3,4)], (196,219,224), accent,1)
-                line([(6,0),(length-4,0)], (244,245,230),2)
-                circle(1,0,5,accent,1)
+                poly([(3,-8),(length-17,-8),(length-5,-3),(length,0),
+                      (length-5,3),(length-17,8),(3,8),(9,0)],
+                     (184,215,219), accent,2)
+                line([(11,0),(length-5,0)], (248,248,233),3)
+                line([(7,-9),(17,-12),(24,-9)], accent,1)
+                circle(1,0,6,accent,2)
             else:
                 poly([(4,-5),(length-10,-5),(length,0),(length-10,5),(4,5)], (220,217,184))
                 line([(4,-12),(9,-7),(9,7),(4,12)], (187,152,51),3)
@@ -176,64 +240,81 @@ def draw_weapon(surface, weapon_id, page_index, grip, angle=0.0, scale=1.0, ink=
         return
 
     if shape in ("revolver", "suppressed", "ink_pistol"):
-        poly([(-5,-3),(6,-3),(4,12),(-4,10)], (134,111,89) if shape=="revolver" else dark)
+        poly([(-6,-4),(7,-4),(4,15),(-6,11)],
+             (135,104,75) if shape == "revolver" else (75,73,72))
         if shape == "revolver":
-            poly([(-5,-12),(18,-12),(18,-7),(5,-7),(5,-2),(-5,-2)], (172,171,159))
-            circle(2,-7,6,dark,1)
-            for x in (-1,3): line([(x,-10),(x,-4)],light,1)
-            line([(-5,-11),(-9,-14)],dark,2)
-            line([(14,-13),(15,-15)],dark,2)
-            line([(4,2),(10,2),(9,6),(4,6)],dark,1)
+            poly([(-8,-14),(10,-14),(10,-10),(29,-10),(31,-8),(29,-5),
+                  (10,-5),(9,-3),(-7,-3)], (184,174,150))
+            circle(3,-8,8,(226,215,190),0)
+            circle(3,-8,8,dark,2)
+            for x,y in ((0,-11),(5,-11),(0,-6),(5,-6)): circle(x,y,1,dark,0)
+            line([(-7,-12),(-12,-18)],dark,2)
+            line([(23,-11),(24,-15)],dark,2)
+            line([(5,0),(12,0),(10,6),(5,6)],dark,1)
         elif shape == "suppressed":
-            poly([(-8,-12),(15,-12),(17,-5),(-7,-5)], dark)
-            poly([(15,-11),(35,-11),(35,-5),(16,-5)], (124,135,126))
-            line([(18,-9),(32,-9)],light,1)
-            for x in (-5,-2,1): line([(x,-11),(x-1,-6)],light,1)
+            poly([(-8,-14),(15,-14),(18,-6),(-8,-6)], (58,69,65))
+            poly([(15,-13),(44,-13),(45,-6),(16,-6)], (111,126,116))
+            line([(19,-9),(42,-9)],paper,1)
+            for x in (22,31,39): line([(x,-13),(x,-6)],dark,1)
+            for x in (-5,0,5): line([(x,-13),(x-2,-7)],light,1)
+            line([(12,-16),(17,-16)],accent,1)
         else:
-            poly([(-7,-12),(22,-12),(23,-5),(-6,-5)], (90,90,97))
-            circle(9,-8,3,(206,199,176),0)
-            line([(19,-13),(19,-15)],dark,1)
+            poly([(-8,-14),(13,-14),(20,-11),(29,-11),(30,-5),
+                  (13,-5),(8,-3),(-8,-4)], (87,87,97))
+            circle(8,-8,5,(206,199,176),0)
+            circle(8,-8,5,dark,1)
+            line([(24,-12),(25,-16)],dark,1)
+            line([(-4,-11),(3,-11)],accent,2)
         return
 
     if shape in ("double_barrel", "breach", "marker"):
-        poly([(-22,0),(-11,-7),(0,-5),(-5,1),(-19,6)], (151,104,64) if shape=="double_barrel" else dark)
+        poly([(-25,0),(-13,-9),(1,-6),(-5,2),(-22,8)],
+             (151,104,64) if shape=="double_barrel" else dark)
         if shape == "double_barrel":
-            poly([(-6,-10),(35,-10),(35,-4),(-6,-4)], (172,170,157))
-            line([(-3,-7),(35,-7)],dark,1)
-            poly([(4,-4),(20,-4),(18,0),(4,0)], (155,112,71))
-            line([(-6,-8),(-10,-12)],dark,2)
+            for y in (-13,-6):
+                poly([(-8,y),(41,y),(44,y+3),(41,y+5),(-8,y+5)], (172,170,157))
+                line([(-4,y+2),(41,y+2)],dark,1)
+            poly([(3,-2),(18,-2),(16,5),(3,5)], (155,112,71))
+            line([(-8,-10),(-14,-16)],dark,2)
         elif shape == "breach":
-            poly([(-9,-11),(27,-11),(30,-6),(-8,-5)],(89,104,96))
-            poly([(7,-5),(20,-5),(20,0),(7,0)],dark)
-            poly([(27,-12),(33,-12),(33,-5),(27,-5)],(125,137,126))
-            for x in range(7,21,3): line([(x,-5),(x,0)],light,1)
+            poly([(-10,-13),(29,-13),(34,-8),(29,-5),(-9,-5)],(89,104,96))
+            poly([(4,-5),(24,-5),(22,5),(5,5)],(119,126,111))
+            poly([(29,-14),(37,-14),(37,-5),(29,-5)],(125,137,126))
+            for x in range(8,22,4): line([(x,-4),(x,4)],dark,2)
+            line([(2,-15),(11,-15)],accent,2)
         else:
-            poly([(-8,-12),(32,-12),(36,-8),(32,-3),(-8,-3)],(79,67,87))
-            poly([(5,-12),(20,-12),(20,-3),(5,-3)],paper)
-            line([(8,-9),(17,-9)],accent,1)
-            line([(8,-6),(16,-6)],dark,1)
+            poly([(-10,-16),(31,-16),(43,-10),(43,-6),(31,-2),(-10,-2)],
+                 (83,68,91))
+            poly([(0,-16),(25,-16),(25,-2),(0,-2)],paper)
+            for y in (-12,-8,-4): line([(3,y),(20,y)],accent,2)
+            poly([(31,-15),(43,-10),(43,-6),(31,-3)],(107,65,101))
         line([(-2,-3),(-2,5),(3,5),(5,-3)],dark,1)
         return
 
     if shape in ("pulse", "null_cannon", "eraser"):
         poly([(-6,-3),(6,-3),(4,11),(-4,11)],dark)
         if shape == "pulse":
-            poly([(-8,-14),(16,-14),(24,-8),(16,-2),(-8,-2)], (189,209,207),accent)
-            circle(12,-8,8,accent,2)
-            circle(12,-8,4,paper,0)
-            line([(20,-14),(30,-14),(32,-11)],accent,2)
-            line([(20,-2),(30,-2),(32,-5)],accent,2)
+            poly([(-8,-17),(16,-17),(26,-10),(16,-1),(-8,-1)], (189,209,207),accent,2)
+            circle(13,-9,8,accent,2)
+            circle(13,-9,4,paper,0)
+            line([(21,-17),(37,-17),(39,-12)],accent,2)
+            line([(21,-1),(37,-1),(39,-6)],accent,2)
             line([(-5,-11),(2,-11)],dark,1)
         elif shape == "null_cannon":
-            poly([(-12,-16),(27,-16),(32,-11),(32,-3),(27,1),(-12,1)], (186,208,209),accent)
-            poly([(-7,-13),(8,-13),(8,-2),(-7,-2)],(222,180,169))
-            for x in (14,20,26): line([(x,-16),(x,1)],accent,2)
-            line([(-8,-9),(3,-9)],paper,2)
+            poly([(-15,-17),(21,-17),(28,-12),(28,-2),(21,3),(-15,3)],
+                 (176,207,209),accent,2)
+            poly([(-9,-13),(5,-13),(5,-1),(-9,-1)],(220,179,168))
+            poly([(26,-18),(39,-18),(42,-12),(32,-10),(42,-4),
+                  (39,4),(26,4)], paper, accent,2)
+            for x in (11,16,21): line([(x,-17),(x,3)],accent,1)
+            line([(-9,-8),(2,-8)],paper,2)
         else:
-            poly([(-12,-16),(29,-16),(33,-12),(33,-3),(29,1),(-12,1)],(211,165,151))
-            poly([(-3,-16),(16,-16),(16,1),(-3,1)],(220,211,181))
-            line([(1,-10),(12,-10)],light,1)
-            line([(1,-6),(10,-6)],light,1)
+            poly([(-17,-17),(26,-17),(37,-12),(37,-2),(26,3),(-17,3)],
+                 (211,165,151))
+            poly([(-4,-17),(17,-17),(17,3),(-4,3)],(225,216,189))
+            poly([(28,-15),(39,-12),(39,-2),(28,1)],(238,210,203))
+            for y in (-12,-7,-2): line([(0,y),(14,y)],light,1)
+            line([(-14,-12),(-14,-2)],accent,2)
         return
 
     # The original notebook rubber band is a small fork, visibly unlike the
@@ -246,8 +327,32 @@ def draw_weapon(surface, weapon_id, page_index, grip, angle=0.0, scale=1.0, ink=
 def draw_weapon_icon(surface, weapon_id, page_index, center, size=42):
     profile = profile_for(page_index, weapon_id)
     shape = profile.silhouette
-    extent = 80 if shape=="excalibur" else 62 if shape in ("katana","double_barrel","breach","marker") else 56
+    # Center each authored outline rather than using one firearm-sized box.
+    # Long tools retain their full silhouette in both the pickup and HUD.
+    extent, offset_x, angle = {
+        "carbon_rifle": (116, 18, -.10),
+        "pencil_maul": (125, 35, -.28),
+        "excalibur": (95, 27, -.37),
+        "katana": (76, 17, -.37),
+        "ion_blade": (72, 15, -.28),
+        "redraw_pencil": (68, 16, -.33),
+        "pencil": (65, 15, -.33),
+        "bowie": (52, 7, -.27),
+        "field_knife": (49, 6, -.35),
+        "double_barrel": (84, 10, -.10),
+        "breach": (76, 7, -.10),
+        "marker": (83, 9, -.10),
+        "null_cannon": (72, 13, .09),
+        "eraser": (70, 11, .09),
+        "pulse": (70, 10, .09),
+        "suppressed": (63, 17, -.08),
+        "revolver": (60, 9, -.08),
+        "ink_pistol": (61, 10, -.08),
+        "chalk_bomb": (44, 0, -.15),
+        "fold_star": (49, 0, -.20),
+        "rubber": (48, 1, -.23),
+    }.get(shape, (62, 8, 0))
     scale = size / extent
-    offset_x = 16 if shape in ("katana","pencil","redraw_pencil","ion_blade","excalibur") else 6
-    offset_y = 0 if weapon_id in ("pencil_blade","excalibur","rubber_band") else -3
-    draw_weapon(surface,weapon_id,page_index,(center[0]-offset_x*scale,center[1]-offset_y*scale),scale=scale)
+    origin = (center[0] - offset_x * math.cos(angle) * scale,
+              center[1] - offset_x * math.sin(angle) * scale)
+    draw_weapon(surface, weapon_id, page_index, origin, angle=angle, scale=scale)

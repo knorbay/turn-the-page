@@ -24,30 +24,40 @@ LESSONS = (
         ("CIRCLES", "circumference = 2πr", "area = πr²", "bring my compass back :)", "circle"),
         ("TRIANGLES", "α + β + γ = 180°", "90° + 60° + ? = 180°", "30°  ✓", "triangle"),
         ("CIRCULAR MOTION", "v = ωr", "one turn = 2π radians", "why is there a sword here?", "circle"),
+        ("INK PRESSURE", "force / area = pressure", "a narrow tip cuts deeper", "do not press through the page", "force"),
+        ("MOON GATE SKETCH", "arc length = rθ", "watch the end of the blade", "there is a gap under the swing", "trajectory"),
     ),
     (
         ("PHYSICS / MOTION", "v = Δx / Δt", "120 m / 6 s = 20 m/s", "remember the units!", "velocity"),
         ("PROJECTILES", "x = v₀ cos(θ) · t", "y = v₀ sin(θ) · t − ½gt²", "ignore air resistance...", "trajectory"),
         ("FRICTION", "Fₛ = μ · N", "N = mg  (level ground)", "keep coffee off the notebook", "force"),
         ("THE TRAIN PROBLEM", "distance = speed × time", "60 km/h × ½ h = 30 km", "the train is not drawn yet", "velocity"),
+        ("BOUNTY POSTERS", "three copies / one original", "ink dries from the outside", "circle the wet signature", "squares"),
+        ("RAILWAY TIMETABLE", "arrival - departure = delay", "23:07 - 22:40 = 27 min", "jump before the second whistle", "velocity"),
     ),
     (
         ("PHYSICS / GRAVITY", "F = G · m₁m₂ / r²", "double r  →  one quarter F", "space was not empty after all", "orbit"),
         ("ORBITAL NOTES", "F = mv² / r", "T = 2πr / v", "the satellite needs batteries", "orbit"),
         ("VECTORS", "R = A + B", "Rₓ = Aₓ + Bₓ", "write the direction too!", "vectors"),
         ("FREE FALL", "v = g · t", "h = ½g · t²", "Earth: g ≈ 9.8 m/s²", "trajectory"),
+        ("SATELLITE POWER", "P = IV", "the panels face the light", "the left one is folded wrong", "orbit"),
+        ("REENTRY ERROR", "heat ∝ speed²", "the suit is too large", "erase the pressure seal again?", "trajectory"),
     ),
     (
         ("OPTICS / REFLECTION", "incident angle = reflected angle", "θᵢ = θᵣ", "the mirror sees everything", "mirror"),
         ("BINARY NUMBERS", "13 = 8 + 4 + 1", "13 (decimal) = 1101 (binary)", "is this a secret message?", "binary"),
         ("COORDINATES", "y = 2x + 1", "x = 2  →  y = 5", "connect the dots", "velocity"),
         ("LENSES", "1/f = 1/dₒ + 1/dᵢ", "converging lens: f > 0", "I cannot see the blackboard", "mirror"),
+        ("CARBON COPIES", "copy 03 ≠ original", "pressure transfers the mark", "the folder is still running", "binary"),
+        ("EVIDENCE VAULT", "file 04 / access denied", "one stamp, two shadows", "follow the red line upstairs", "squares"),
     ),
     (
         ("FINAL LESSON / REVISION", "(a + b)² = a² + 2ab + b²", "(x + 3)² = x² + 6x + 9", "show your working!", "squares"),
         ("NEWTON'S THIRD LAW", "F₁₂ = −F₂₁", "action and reaction", "the paper hits back", "force"),
         ("EQUATIONS", "2x + 6 = 18", "2x = 12  →  x = 6", "revise it; do not start over", "squares"),
         ("IS CLASS OVER?", "answer = ?", "the back of this page is blank", "wait for the bell", "clock"),
+        ("REVISION HISTORY", "v1 + v2 = ?", "the first answer is crossed out", "you can keep the crooked one", "vectors"),
+        ("LAST CORRIDOR", "x = 0, 1, 2, 3", "jump over what was erased", "turning the page is your answer", "trajectory"),
     ),
 )
 
@@ -103,7 +113,7 @@ class NotebookAnnotations:
         for i in range(5):
             pygame.draw.line(surface, (*GRAPHITE, 90),
                              (325 + i*6, 151+i%2), (328 + i*6, 152+i%2), 1)
-        return pygame.transform.rotate(surface, (1.1, -.8, .5, -1.2)[index])
+        return pygame.transform.rotate(surface, (1.1, -.8, .5, -1.2, .8, -.5)[index % 6])
 
     def _diagram(self, s, kind, x, y, seed):
         c = (*BLUE, 205)
@@ -185,4 +195,4 @@ class NotebookAnnotations:
             if x > surface.get_width() or x < -530:
                 continue
             y = 113 + (i%2)*19
-            surface.blit(self.sheets[page][i%4], (x,y))
+            surface.blit(self.sheets[page][i%len(self.sheets[page])], (x,y))

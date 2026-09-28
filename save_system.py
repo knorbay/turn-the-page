@@ -24,6 +24,7 @@ DEFAULT_PROGRESS = {
     # Facts the Artist can react to.  These are deliberately counters and
     # recent events rather than an exposed morality/personality score.
     "behavior": {},
+    "notebook_choices": {},
     "settings": {
         "master_volume": 0.8,
         "sfx_volume": 0.85,
@@ -65,7 +66,7 @@ class SaveSystem:
         except (OSError, ValueError, TypeError):
             return self.data
         for key in ("chapter", "checkpoint", "secrets", "completed", "achievements", "play_seconds",
-                    "weapons", "current_weapon", "weapon_ammo", "behavior"):
+                    "weapons", "current_weapon", "weapon_ammo", "behavior", "notebook_choices"):
             if key in raw:
                 self.data[key] = raw[key]
         if isinstance(raw.get("settings"), dict):

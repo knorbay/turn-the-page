@@ -12,18 +12,20 @@ from world import PaperWorld, PaperNote
 
 NEW_ROOMS={
  3: (
-  ('agent_checkpoint',1100,2120,('redaction_agent','ink_clone'),('redaction_agent','paper_wasp','ink_clone')),
-  ('carbon_crossfire',3000,4200,('redaction_agent','ruler_guard'),('doodle_turret','redaction_agent','comet_hound')),
-  ('redacted_rooftops',5000,6200,('gutter_lantern','redaction_agent'),('ink_clone','eraser_brute','redaction_agent')),
-  ('office_ambush',7000,8240,('redaction_agent','crumpled_one','ink_clone'),('paper_wasp','doodle_turret','redaction_agent')),
-  ('scissor_office',9000,10320,('redaction_agent','ink_clone'),('scissor_director',)),
+  ('agent_checkpoint',1100,2120,('redaction_agent','ink_clone'),('redaction_agent','folder_glider','ink_clone')),
+  ('carbon_crossfire',3000,4200,('redaction_agent','ruler_guard'),('margin_sniper','redaction_agent','file_runner')),
+  ('redacted_rooftops',5000,6200,('folder_glider','redaction_agent'),('ink_clone','eraser_brute','split_lantern')),
+  ('office_ambush',7000,8240,('redaction_agent','crumpled_one','ink_clone'),('folder_glider','doodle_turret','redaction_agent')),
+  ('evidence_vault',9000,10260,('redaction_agent','doodle_turret'),('ink_clone','carbon_stamper')),
+  ('scissor_office',12100,13620,('redaction_agent','ink_clone'),('scissor_director',)),
  ),
  4: (
-  ('last_lesson',900,2040,('ink_samurai','redaction_agent'),('lantern_yokai','comet_hound','ruler_guard')),
-  ('erased_answers',2800,4020,('eraser_brute','doodle_turret'),('moon_bot','redaction_agent','ink_clone')),
-  ('margin_revolt',4800,6040,('rake_cactus','goblin_scribble','origami_drone'),('redaction_agent','comet_hound','ruler_guard')),
-  ('the_last_crossout',6900,8140,('ink_clone','redaction_agent','moon_bot'),('eraser_brute','ember_hound','ink_samurai')),
-  ('final_margin_revision',9000,10520,('final_editor',)),
+  ('last_lesson',900,2040,('ink_samurai','redaction_agent'),('lantern_yokai','gutter_lantern','ruler_guard')),
+  ('erased_answers',2800,4020,('eraser_brute','doodle_turret'),('satellite_sentry','redaction_agent','ink_clone')),
+  ('margin_revolt',4800,6040,('rake_cactus','ink_outlaw','ticket_vulture'),('redaction_agent','file_runner','ruler_guard')),
+  ('the_last_crossout',6900,8140,('ink_clone','redaction_agent','moon_bot'),('margin_sniper','ember_hound','fold_duelist')),
+  ('unfinished_corridor',9000,10260,('fold_duelist','redaction_agent'),('satellite_sentry','ink_clone')),
+  ('final_margin_revision',12100,13620,('final_editor',)),
  )
 }
 ROOM_BRIEFS={
@@ -31,12 +33,14 @@ ROOM_BRIEFS={
  'carbon_crossfire':('02 / CARBON CROSSFIRE','Climb the ink line; drop behind the shield.'),
  'redacted_rooftops':('03 / ROOFTOP REVISION','Leave the violet column before the ink falls.'),
  'office_ambush':('04 / THE OFFICE BITES','Deal with the turret before the next copy.'),
- 'scissor_office':('THE HEAD OF REDACTION','Jump the low cut. Leave the X. Hit the open hinge.'),
+ 'evidence_vault':('05 / EVIDENCE VAULT','Copies guard the files. Break their line of sight.'),
+ 'scissor_office':('THE HEAD OF REDACTION','Jump his baton. Leave the firing lines. Strike the exposed core.'),
  'last_lesson':('01 / WRONG CLASS','Five pages of enemies. One small stick figure.'),
  'erased_answers':('02 / ERASED ANSWERS','A platform can save you. Watch the eraser.'),
  'margin_revolt':('03 / MARGIN REVOLT','Jump the gold rake, then break the ranged line.'),
  'the_last_crossout':('04 / THE LAST CROSSOUT','The blue trail stays hot. Cross it in the air.'),
- 'final_margin_revision':('THE FINAL EDITOR','Read the proof. Attack when the binder opens.'),
+ 'unfinished_corridor':('05 / UNFINISHED CORRIDOR','Old drafts can still fight. Move between their styles.'),
+ 'final_margin_revision':('THE REJECTED HERO','Read your old draft. Attack when its guard drops.'),
 }
 
 class ArtistCombatHand:
@@ -140,7 +144,7 @@ class FinalPageEdit:
 
 def build_new_page(index):
     world=PaperWorld(index,False)
-    end=10800
+    end=14200
     title,subtitle=('PAGE IV','The Carbon Agent') if index==3 else ('PAGE V','The Last Draft')
     runtime=ChapterRuntime(index,title,subtitle,world,(180,542),end,[Checkpoint('start',180,542)])
     runtime.campaign_last_index=4
@@ -148,7 +152,7 @@ def build_new_page(index):
     runtime.route_landmarks=[]
     # Continuous safety floor between authored fights; physical raised choices
     # inside rooms change projectile paths, flanks and jump timing.
-    for i in range(12):
+    for i in range(math.ceil((end+220)/950)):
         p=world.add(i*950-30,(i+1)*950+10,590,16,f'campaign_floor_{i}',7000+index*100+i)
         p.appearance='carbon' if index==3 else 'handwriting'
     gift_specs=((650,'ink_pistol'),(4550,'marker_shotgun')) if index==3 else ((460,'rubber_band'),(2350,'eraser_cannon'),(6350,'marker_shotgun'))
@@ -186,6 +190,18 @@ def build_new_page(index):
             p.draw_progress=0;p.appearance='handwriting'
             runtime.entities.add(ArtistCombatHand(arena,p))
         if room=='final_margin_revision':runtime.entities.add(FinalPageEdit(arena,world))
+    # The last fight now follows a short playable approach.  The original
+    # floor stays intact; the new drawn ledges give a safe jump line around
+    # two timed hazards instead of stretching an empty corridor.
+    from route_events import CorridorInk
+    for step,(x,y) in enumerate(((10530,505),(10820,445),(11160,510),(11500,455))):
+        landing=world.add(x,x+215,y,10,f'last_approach_{step}',8200+step)
+        landing.appearance='carbon' if index==3 else 'handwriting'
+    for x in (10840,11520):
+        runtime.entities.add(CorridorInk(x,index))
+    world.notes.append(PaperNote(10430,330,
+        'RED LINE: wait, jump, or dash through' if index==3 else
+        'ERASER BELOW: take the upper ink', 'small',(142,77,72)))
     # A compact optional rooftop detour, clear of arena entrance strokes.
     base=4350 if index==3 else 8350
     for i,y in enumerate((505,430,505)):

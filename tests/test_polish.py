@@ -13,6 +13,8 @@ from entities import LostSketch
 from game import Game
 from particles import Particle, ParticleSystem
 from player import Player
+from route_puzzles import (DraftBridgePuzzle, PerforatedPosterPuzzle,
+                           SatelliteRelayPuzzle)
 from settings import WIDTH, HEIGHT
 from staging import ROUTES
 
@@ -29,6 +31,12 @@ class PolishContracts(unittest.TestCase):
         for page, start, _, secret, _, _ in ROUTES:
             runtime = build_chapter(page)
             world = runtime.world
+            # This checks the optional vignette route after the required
+            # chapter revision; the puzzle-specific tests cover closed gates.
+            for entity in runtime.entities.items:
+                if isinstance(entity, (DraftBridgePuzzle, PerforatedPosterPuzzle,
+                                       SatelliteRelayPuzzle)):
+                    entity.completed = True
             steps = sorted((p for p in world.platforms if p.name.startswith('vignette_')), key=lambda p:p.x1)
             player = Player(start-90, 542)
             player.on_ground = True

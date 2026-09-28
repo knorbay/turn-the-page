@@ -4,7 +4,7 @@ FPS = 60
 TITLE = "Turn the Page"
 GAME_SLUG = "turn-the-page"
 ARCHIVE_NAME = "Turn-the-Page"
-VERSION = "0.9.0-beta-r8"
+VERSION = "0.20.0-living-pages"
 BUNDLE_ID = "com.turnthepage.game"
 
 PAPER = (247, 243, 224)

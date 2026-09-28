@@ -13,6 +13,7 @@ os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 import pygame
 
 from achievements import ACHIEVEMENTS
+from behavior import BehaviorLedger
 from game import Game
 from settings import HEIGHT, WIDTH
 
@@ -60,6 +61,19 @@ class AchievementContracts(unittest.TestCase):
 
             for _ in range(3):
                 game.behavior.record("perfect_return")
+            game.behavior.record('practice_complete')
+            for _ in range(5): game.behavior.record('artist_reply')
+            for puzzle_id in ('first_page_draft', 'wanted_perforation', 'satellite_relay'):
+                game.behavior.record('puzzle_solved', puzzle_id=puzzle_id)
+            game.behavior.record('puzzle_solved', puzzle_id='first_page_draft')
+            self.assertEqual(game.behavior.count('puzzle_solved'), 3)
+            for _ in range(20): game.behavior.record('arena_clear')
+            for _ in range(7): game.behavior.record('perfect_return')
+            for kind in ('fold_duelist','margin_sniper','split_lantern', 'ruler_guard',
+                         'paper_wasp','ink_clone','goblin_scribble','redaction_agent',
+                         'moon_bot','star_scout','cactus_gunner','eraser_brute'):
+                game.behavior.record('enemy_defeated', kind=kind)
+            game.save.data['secrets'] = [str(i) for i in range(12)]
             game.achievements.evaluate(game)
             self.assertEqual(game.achievements.count, len(ACHIEVEMENTS))
             self.assertEqual(len(game.save.data["achievements"]), len(ACHIEVEMENTS))
@@ -81,6 +95,16 @@ class AchievementContracts(unittest.TestCase):
             self.assertIsNotNone(game.achievement_banner)
             game._key_down(pygame.K_ESCAPE)
             self.assertEqual(game.state, "title")
+
+    def test_route_puzzle_progress_is_unique_across_save_reload(self):
+        ledger = BehaviorLedger()
+        ledger.record("puzzle_solved", puzzle_id="first_page_draft")
+        restored = BehaviorLedger(ledger.snapshot())
+        restored.record("puzzle_solved", puzzle_id="first_page_draft")
+        restored.record("puzzle_solved", puzzle_id="wanted_perforation")
+        self.assertEqual(restored.count("puzzle_solved"), 2)
+        self.assertEqual(restored.data["puzzles_solved"],
+                         ["first_page_draft", "wanted_perforation"])
 
 
 if __name__ == "__main__":

@@ -28,6 +28,10 @@ ACTION_ENCOUNTER_IDS = (
 )
 
 WEAPON_PICKUPS = {
+    "chalk_bomb": (1, 6480, 0),
+    # Earned by the optional archive / rejected-warrior trials.
+    "carbon_lance": (3, 4580, 0),
+    "folded_shuriken": (0, 7250, 0),
     "ink_pistol": (1, 2085, 0),
     "marker_shotgun": (1, 8220, 0),
     "eraser_cannon": (2, 10200, 0),

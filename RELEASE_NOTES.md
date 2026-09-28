@@ -1,40 +1,29 @@
-# TURN THE PAGE — Beta 0.9.0 r8
+# TURN THE PAGE — 0.20.0 Living Pages
 
-TURN THE PAGE is a combat-heavy 2D action game drawn across five school-notebook
-pages. The Artist outside the paper can redraw the hero, lend era-specific
-weapons, alter arenas, mock a defeat, or change the final confrontation based
-on how the player fights.
+Three physical route puzzles let players revise the notebook: draw and erase
+the first page's bridge, leap onto the Western Wanted poster's torn shelf and
+dash through its high seam, then carry a fading star across orbital platforms
+to open the satellite airlock. Each has visible hints, Artist replies,
+checkpoint restoration and persistent achievement progress.
 
-This revision focuses on readable, deliberate combat:
+Twenty-eight page-anchored graphite set pieces add distinct scenery throughout
+the five-page campaign. The original thematic boss silhouettes remain; melee
+weapons now leave different live strokes and defeated enemies fade as erased
+sketches. Earlier weapon, sound, combat and page-turn improvements remain.
 
-- Grounded running, articulated jumps and landings, fading dash impressions, and page-specific full-body blade stances.
-- Bowie cuts leave visible marks on their target. The full bonus requires all three cuts in the same chain. The Field Knife marks wounded targets and its next finishing cut.
-- Projectiles test directional armour from the side they actually approach. Banked shots can reach a train's rear even when the player stands in front.
-- Blocked hits no longer draw successful weapon-impact marks.
-- Boss attack warnings and opening marks follow their actual attack direction, remaining punish hits, and recovery time.
-- Enemy attack starts are coordinated with nearby lingering threats while preserving distinct enemy roles.
-- The menu and download filenames show the r8 revision.
+Validation includes 218 gameplay tests, the complete five-page automated route
+and physical puzzle collision checks. The tagged release workflow builds native
+Windows, Linux and macOS archives and checks each packaged runtime before
+publishing. Existing campaign saves remain compatible.
 
-The five-page campaign, three-heart fight resets, earned weapons, and Baby-Face reversal remain compatible with existing saves.
+## Previous release: 0.13.0 Expanded Pages
 
-This beta includes:
+Pages IV and V now have six required rooms each, a safe raised route before the boss, and timed carbon/eraser marks to read and avoid. Five themed enemies replace mismatched late-page silhouettes. A low-damage, two-shot Chalk Capsule appears on Pages II and III; its arc and small burst change how cover and groups are handled. Thirty different school notes give long pages more local identity. On death the figure buckles into a rejected drawing before the Artist redraws it. The audio mixer caps overlapping effect voices and softens the loudest paper cues. The previous opaque-surface macOS display fix is retained.
 
-- five complete pages and 23 required encounters;
-- 20 ordinary enemy types, six named bosses, and the Baby-Face reversal;
-- Ronin, Western, orbital, agent, and final-draft weapon sets;
-- twelve persistent Lost Sketch techniques and four finale variants;
-- keyboard, mouse, and controller support;
-- English interface and notebook notes;
-- adaptive combat music, page-turn school bells, classroom ambience, and
-  distinct material/combat effects;
-- automatic checkpoint saves outside the application folder.
+See GENISLETILMIS_SURUM_013.md for Turkish scope and verification.
 
-Health is fixed at three marks and refills at each new fight. A named boss also
-starts with three marks after its guard wave.
+# TURN THE PAGE — 0.11.0 Living Notebook
 
-Beta builds are available for Windows, Linux, and macOS. The macOS build is not
-Apple-notarized yet; players may need to approve it from Privacy & Security.
+Player requests now draw a real route or a slow, projectile-erasing oversized pencil. Low-ink requests erase one ordinary foe; boss phase changes provoke additive Artist revisions. Five notebook papers, revised opening enemy art, graphite impacts, original desk-score layers and a curling printed page replace the scenic-platformer presentation. Existing campaign, weapons, boss rules and 0.10 improvements remain.
 
-Feedback that helps most: first-play difficulty, combat readability, controller
-feel, unexpected deaths, and any route/platform soft lock. Include the page and
-room name shown on screen.
+See LIVING_NOTEBOOK_TR.md for scope, controls and validation.

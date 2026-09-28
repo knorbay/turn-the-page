@@ -15,9 +15,8 @@ _SOUND_CACHE: dict[tuple[int, str], pygame.mixer.Sound] = {}
 _PITCHED_CACHE: dict[tuple[int, str, int, int], pygame.mixer.Sound] = {}
 
 SELECTED_PAGE_TRACKS = {
-    0: {"calm": "music/page_0_calm.ogg", "action": "music/page_0_action.ogg"},
-    1: {"calm": "music/page_1_calm.mp3", "action": "music/page_1_action.mp3"},
-    2: {"calm": "music/page_2_calm.mp3", "action": "music/page_2_action.mp3"},
+    page: {label: f"desk/page_{page}_{label}.wav" for label in ("calm","action","boss")}
+    for page in range(5)
 }
 
 RECORDED_SFX = {
@@ -44,6 +43,11 @@ class CueProfile:
 
 
 SFX_PLAYBACK = {
+    "pencil": CueProfile(.54, 35),
+    "paper_break": CueProfile(.66, 55),
+    "redraw": CueProfile(.62, 80),
+    "giant_step": CueProfile(.62, 105),
+    "giant_stomp": CueProfile(.72, 110, (1.0,), .12, 125),
     # Player tools keep their own weight and leave headroom for hit feedback.
     "blade": CueProfile(.74, 24, (.975, 1.015, .995), .05, 65),
     "katana_cut": CueProfile(.78, 28, (.97, 1.02, .99), .06, 75),
@@ -136,6 +140,8 @@ class NotebookSounds:
         self.classroom_channel = None
         self.bell_channel = None
         self.cue_channel = None
+        self.effect_channels = ()
+        self._effect_started = [0] * 6
         self.classroom_sound = None
         self.bell_duck_until = 0
         self.transient_duck_started = 0
@@ -205,6 +211,9 @@ class NotebookSounds:
         self.classroom_channel = pygame.mixer.Channel(3)
         self.bell_channel = pygame.mixer.Channel(4)
         self.cue_channel = pygame.mixer.Channel(5)
+        # A small voice pool keeps clustered pellets and enemy deaths tactile
+        # without summing a dozen sharp samples in the same audio frame.
+        self.effect_channels = tuple(pygame.mixer.Channel(i) for i in range(6, 12))
 
     def _bell_duck(self) -> float:
         remaining = self.bell_duck_until - pygame.time.get_ticks()
@@ -289,11 +298,12 @@ class NotebookSounds:
     def _ensure_page_audio(self, page: int) -> None:
         if self.ambience[page] is not None:
             return
+        from desk_audio import desk_score
         labels = {
             "ambience": (self.ambience, lambda: self.composer.ambience(page)),
-            "calm": (self.score_low, lambda: self.composer.score(page, 0)),
-            "action": (self.score_high, lambda: self.composer.score(page, 1)),
-            "boss": (self.score_boss, lambda: self.composer.score(page, 1, True)),
+            "calm": (self.score_low, lambda: desk_score(self.composer, page, 0)),
+            "action": (self.score_high, lambda: desk_score(self.composer, page, 1)),
+            "boss": (self.score_boss, lambda: desk_score(self.composer, page, 1, True)),
         }
         cache = _RAW_BANKS[self.sample_rate]["pages"]
         page_cache = cache.setdefault(page, {})
@@ -379,7 +389,7 @@ class NotebookSounds:
         """
         if self.enabled and name in self.sound_variants:
             resolved = self.resolve_cue(name)
-            profile = SFX_PLAYBACK.get(resolved, SFX_PLAYBACK.get(name, CueProfile()))
+            profile = SFX_PLAYBACK.get(resolved, SFX_PLAYBACK.get(name, CueProfile(.72, 35)))
             now = pygame.time.get_ticks()
             try:
                 chosen_cooldown = (profile.cooldown_ms if cooldown_ms is None
@@ -435,9 +445,17 @@ class NotebookSounds:
                 self._apply_mix()
                 channel = self.cue_channel
             else:
-                channel = sound.play()
-                if channel is not None:
-                    channel.set_volume(cue_gain)
+                free = next((index for index, voice in enumerate(self.effect_channels)
+                             if not voice.get_busy()), None)
+                busy = sum(voice.get_busy() for voice in self.effect_channels)
+                index = (free if free is not None else
+                         min(range(len(self.effect_channels)),
+                             key=self._effect_started.__getitem__))
+                channel = self.effect_channels[index]
+                channel.play(sound)
+                self._effect_started[index] = now
+                burst_gain = 1.0 if busy < 2 else .83 if busy < 4 else .68
+                channel.set_volume(cue_gain * burst_gain)
             if channel is not None:
                 self._last_played[resolved] = now
                 self._start_transient_duck(profile.duck, profile.duck_ms)
@@ -499,13 +517,14 @@ class NotebookSounds:
             variant = "boss" if boss else "page"
             # A boss cue intentionally restarts on its entrance; ordinary
             # combat remains phase-aligned with the calm page score.
-            if boss or variant != self.action_variant or not self.combat_channel.get_busy():
+            if variant != self.action_variant or not self.combat_channel.get_busy():
                 self.combat_channel.play(desired, loops=-1, fade_ms=240)
             self.action_variant = variant
             self.intensity = max(self.intensity, .44 if not boss else .70)
         else:
             self.intensity = 0.0
-            self.combat_channel.fadeout(360)
+            # Keep the desk loop running silently so the next fight joins its beat.
+            self.combat_channel.set_volume(0)
         self._apply_mix()
 
     def set_intensity(self, value: float, boss: bool = False):

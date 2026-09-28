@@ -34,7 +34,7 @@ jobs:
         include:
           - os: windows-latest
             artifact: windows
-          - os: ubuntu-latest
+          - os: ubuntu-22.04
             artifact: linux
           - os: macos-14
             artifact: macos
@@ -96,6 +96,8 @@ jobs:
           BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
           ITCH_TARGET: ${{ vars.ITCH_TARGET }}
         run: |
+          mkdir -p .linux-beta
+          tar -xzf release/Turn-the-Page-Linux-*.tar.gz -C .linux-beta
           .butler/butler push release/Turn-the-Page-Windows-*.zip "${ITCH_TARGET}:windows-beta" --userversion "$GITHUB_REF_NAME"
-          .butler/butler push release/Turn-the-Page-Linux-*.tar.gz "${ITCH_TARGET}:linux-beta" --userversion "$GITHUB_REF_NAME"
+          .butler/butler push ".linux-beta/Turn the Page" "${ITCH_TARGET}:linux-beta" --userversion "$GITHUB_REF_NAME"
           .butler/butler push release/Turn-the-Page-macOS-*.zip "${ITCH_TARGET}:macos-beta" --userversion "$GITHUB_REF_NAME"

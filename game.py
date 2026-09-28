@@ -4,6 +4,7 @@ import math
 import pygame
 
 from achievements import ACHIEVEMENTS, AchievementTracker
+from major_update import ArtistCompanion
 from audio import NotebookSounds
 from behavior import BehaviorLedger
 from camera import Camera
@@ -39,6 +40,7 @@ class Game:
         self._configure_initial_display()
         self.renderer = PaperRenderer()
         self.behavior = BehaviorLedger(self.save.data.get("behavior"))
+        self.artist_companion = ArtistCompanion()
         self.achievements = AchievementTracker(self.save)
         self.achievement_banner = None
         self.achievement_time = 0.0
@@ -86,6 +88,7 @@ class Game:
         if new_game:
             self.save.new_game()
         self.behavior = BehaviorLedger(self.save.data.get("behavior"))
+        self.artist_companion = ArtistCompanion()
         self.achievements = AchievementTracker(self.save)
         self.achievement_banner = None
         self.achievement_time = 0.0
@@ -113,6 +116,7 @@ class Game:
 
     def continue_game(self):
         self.behavior = BehaviorLedger(self.save.data.get("behavior"))
+        self.artist_companion = ArtistCompanion()
         self.achievements = AchievementTracker(self.save)
         self.achievement_banner = None
         self.achievement_time = 0.0
@@ -147,19 +151,21 @@ class Game:
         self.level.weapons = self.weapons
         self.level.game = self
         self._apply_page_identity()
+        self._visual_weapon_id = self.weapons.current_id
+        self.weapon_reveal_time = 0.0
 
     def _apply_page_identity(self):
         """Each world owns its temporary tools and player silhouette."""
         self.weapons.configure_page(self.level.chapter_index)
         apply_sketch_rewards(self.player, self.save.data.get("secrets", []))
         page_loadouts = {
-            0: ("pencil_blade",),
-            1: ("pencil_blade", "ink_pistol", "marker_shotgun"),
-            2: ("pencil_blade", "rubber_band", "eraser_cannon", "excalibur"),
-            3: ("pencil_blade", "ink_pistol", "marker_shotgun"),
-            4: ("pencil_blade", "rubber_band", "eraser_cannon", "marker_shotgun"),
+            0: ("pencil_blade", "folded_shuriken"),
+            1: ("pencil_blade", "ink_pistol", "marker_shotgun", "chalk_bomb"),
+            2: ("pencil_blade", "rubber_band", "eraser_cannon", "excalibur", "chalk_bomb"),
+            3: ("pencil_blade", "ink_pistol", "marker_shotgun", "carbon_lance", "folded_shuriken"),
+            4: ("pencil_blade", "rubber_band", "eraser_cannon", "marker_shotgun", "folded_shuriken"),
         }
-        allowed = page_loadouts.get(self.level.chapter_index, tuple(WEAPON_ORDER))
+        allowed = (*page_loadouts.get(self.level.chapter_index, tuple(WEAPON_ORDER)), "margin_maul")
         constrain = getattr(self.weapons, "constrain_page_inventory", None)
         if callable(constrain):
             constrain(allowed, reset=self.level.current_checkpoint == "start")
@@ -400,8 +406,11 @@ class Game:
                 self.state = self.previous_state
         elif self.state == "back_pages" and button in (0, 1):
             self.state = "pause"
-        elif self.state == "achievements" and button in (0, 1):
-            self.state = self.previous_state
+        elif self.state == "achievements":
+            if button in (0, 1):
+                self.state = self.previous_state
+            elif button in (4, 5):
+                self._turn_achievement_page(-1 if button == 4 else 1)
         elif self.state == "ending" and button == 0:
             self.state = "title"
 
@@ -510,6 +519,8 @@ class Game:
             if key in (pygame.K_ESCAPE, pygame.K_b, pygame.K_RETURN):
                 self.state = "pause"
         elif self.state == "achievements":
+            if key in (pygame.K_LEFT, pygame.K_RIGHT):
+                self._turn_achievement_page(-1 if key == pygame.K_LEFT else 1)
             if key in (pygame.K_ESCAPE, pygame.K_a, pygame.K_RETURN):
                 self.state = self.previous_state
         elif self.state == "settings":
@@ -584,8 +595,13 @@ class Game:
                 return
         elif self.state == "back_pages" and self._back_pages_close_rect().collidepoint(pos):
             self.state = "pause"
-        elif self.state == "achievements" and self._achievements_close_rect().collidepoint(pos):
-            self.state = self.previous_state
+        elif self.state == "achievements":
+            if self._achievements_close_rect().collidepoint(pos):
+                self.state = self.previous_state
+            elif pygame.Rect(300,580,140,34).collidepoint(pos):
+                self._turn_achievement_page(-1)
+            elif pygame.Rect(680,580,140,34).collidepoint(pos):
+                self._turn_achievement_page(1)
 
     @staticmethod
     def _pause_options():
@@ -684,7 +700,7 @@ class Game:
         mouse_x, mouse_y = self._window_to_canvas(pygame.mouse.get_pos(), clamp=True)
         joystick = self._active_joystick()
         stick_x = self._joystick_axis(joystick, 0)
-        hat_x, _ = self._joystick_hat(joystick)
+        hat_x, hat_y = self._joystick_hat(joystick)
         controller_left = stick_x < -.24 or hat_x < 0
         controller_right = stick_x > .24 or hat_x > 0
         controller_attack = self._joystick_button(joystick, 2)
@@ -692,6 +708,8 @@ class Game:
         return InputFrame(
             left=bool(keys[pygame.K_a] or keys[pygame.K_LEFT] or controller_left),
             right=bool(keys[pygame.K_d] or keys[pygame.K_RIGHT] or controller_right),
+            down=bool(keys[pygame.K_s] or keys[pygame.K_DOWN] or hat_y < 0
+                      or self._joystick_axis(joystick, 1) > .5),
             jump_pressed=self.pending_input.jump_pressed,
             jump_held=bool(keys[pygame.K_SPACE] or self._joystick_button(joystick, 0)),
             jump_released=self.pending_input.jump_released,
@@ -734,7 +752,8 @@ class Game:
             return
         frame = self._consume_action_buffer(frame)
         if frame.jump_pressed:
-            self.player.queue_jump()
+            if not (frame.down and self.player.drop_through(self.level.world)):
+                self.player.queue_jump()
         if frame.jump_released:
             self.player.release_jump()
         if frame.dash_pressed and self.player.start_dash(frame.axis, self.particles):
@@ -769,7 +788,12 @@ class Game:
             self.behavior.record("attack", weapon=self.weapons.current_id,
                                  page=self.level.chapter_index)
         aim_angle = math.atan2(self.weapons.aim_direction.y, self.weapons.aim_direction.x)
-        self.player.set_weapon_pose(self.weapons.current_id, aim_angle, .7 if fired else 0)
+        current_weapon = self.weapons.current
+        reload_progress = (1 - current_weapon.reload_timer /
+                           max(.001, getattr(current_weapon, "reload_duration",
+                                             current_weapon.reload_time))) if current_weapon.reloading else None
+        self.player.set_weapon_pose(self.weapons.current_id, aim_angle,
+                                    .7 if fired else 0, reload_progress)
         self.player.update(dt, frame.axis, self.level.world, self.particles)
         combatants = [enemy for entity in self.level.entities.items
                       if getattr(entity, "encounter_active", False)
@@ -778,6 +802,12 @@ class Game:
         self.level.update(dt, self.player, self.camera, self.particles, self.sounds,
                           frame.interact, self.session_seconds)
         self.weapons.update(dt, context, self.level.entities)
+        if self.weapons.current_id != self._visual_weapon_id:
+            self._visual_weapon_id = self.weapons.current_id
+            self.weapon_reveal_time = 2.8
+        else:
+            self.weapon_reveal_time = max(0.0, self.weapon_reveal_time - dt)
+        self.artist_companion.update(dt, self, frame)
         self.particles.update(dt)
         self.camera.update(dt, self.player.center_x, self.level.world.width,
                            self.player.vx, self.player.y)
@@ -813,6 +843,7 @@ class Game:
         buffered.jump_released = buffered.jump_released or frame.jump_released
         buffered.interact = buffered.interact or frame.interact
         buffered.attack_pressed = buffered.attack_pressed or frame.attack_pressed
+        buffered.down = buffered.down or (frame.down and frame.jump_pressed)
         buffered.dash_pressed = buffered.dash_pressed or frame.dash_pressed
         buffered.reload_pressed = buffered.reload_pressed or frame.reload_pressed
         if frame.weapon_slot is not None:
@@ -825,6 +856,7 @@ class Game:
 
     def _consume_action_buffer(self, frame):
         buffered = self._buffered_actions
+        frame.down = frame.down or buffered.down
         frame.jump_pressed = frame.jump_pressed or buffered.jump_pressed
         frame.jump_released = frame.jump_released or buffered.jump_released
         frame.interact = frame.interact or buffered.interact
@@ -939,6 +971,12 @@ class Game:
                 self._draw_pause()
         if self.state == "playing" and not self.transition_active:
             self._draw_aim_cursor()
+            if self.weapon_reveal_time > 0:
+                self._draw_weapon_reveal()
+            if (not self.player.locked and self.level.toast_time <= 0 and self.achievement_time <= 0
+                    and not any(getattr(e,'letter_time',0)>0 or getattr(e,'encounter_active',False)
+                                for e in self.level.entities.items)) :
+                self.artist_companion.draw(self.screen, self.renderer, self.last_input_device == "controller")
         if self.achievement_banner is not None and self.achievement_time > 0:
             self._draw_achievement_banner()
         if self.state in ("title", "settings", "pause", "back_pages", "achievements"):
@@ -952,15 +990,19 @@ class Game:
             shade = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
             shade.fill((70, 61, 49, 20))
             target.blit(shade, (0, 0))
-        from staging import draw_landmarks
-        draw_landmarks(target, self.camera, self.level.runtime, self.time)
-        world.draw(target, self.camera, self.renderer, self.time)
-        self.level.draw_entities(target, self.camera, self.renderer)
-        self.weapons.draw_world(target, self.camera, self.renderer)
-        self.particles.draw(target, self.camera)
-        self.player.draw(target, self.camera)
+        # Draw onto the opaque paper canvas. The native macOS blitter can
+        # miscompose a full-screen intermediate RGBA layer and hide the page.
+        ink = target
+        world.draw(ink, self.camera, self.renderer, self.time)
+        self.level.draw_entities(ink, self.camera, self.renderer)
+        self.weapons.draw_world(ink, self.camera, self.renderer)
+        self.particles.draw(ink, self.camera)
+        self.player.draw(ink, self.camera)
         self.level.director.draw(target, self.camera, self.renderer)
         self.level.draw_artist_overlay(target, self.camera, self.renderer)
+        for entity in self.level.entities.items:
+            draw_overlay = getattr(entity, "draw_overlay", None)
+            if callable(draw_overlay): draw_overlay(target, self.camera, self.renderer)
         if self.level.fold_progress > 0:
             self._draw_fold(target, self.level.fold_progress)
 
@@ -997,9 +1039,17 @@ class Game:
         next_page = pygame.Surface((WIDTH, HEIGHT))
         next_index = min(4, self.level.chapter_index + 1)
         self.renderer.background(next_page, next_index)
-        chapter, title = CHAPTER_TITLES[next_index]
-        self.renderer.doodle_text(next_page, chapter, (150, 215), INK_LIGHT, self.renderer.font_small, -1)
-        self.renderer.doodle_text(next_page, title, (150, 250), INK, self.renderer.font_big, 1)
+        self.renderer.notebook.draw(next_page, Camera(WIDTH), next_index)
+        promises = {1: "Who drew the gun?", 2: "I did not draw that moon.",
+                    3: "Someone is cutting the notebook.", 4: "He has been reading your moves."}
+        self.renderer.notebook.hand(next_page, "next lesson...", (200,315), INK_LIGHT)
+        self.renderer.notebook.hand(next_page, promises[next_index], (200,355), INK)
+        from advanced_enemies import create_enemy
+        glimpse = create_enemy({1:'wanted_sketch',2:'orbital_mistake',3:'scissor_director',4:'final_editor'}[next_index],810)
+        old_clip=next_page.get_clip()
+        next_page.set_clip(pygame.Rect(690,400,230,180))
+        glimpse.draw(next_page,Camera(WIDTH),self.renderer)
+        next_page.set_clip(old_clip)
         jitter_line(next_page, INK, (0, 590), (WIDTH, 590), 3, 700 + next_index, 2, 1.5)
         page_progress = (self.transition_progress - erase_phase) / (1 - erase_phase)
         self.renderer.page_turn(self.screen, self.transition_snapshot, next_page, page_progress)
@@ -1089,6 +1139,30 @@ class Game:
             panel.set_alpha(round(255 * min(1, self.level.toast_time / .35)))
             self.screen.blit(panel, (x, 19))
 
+    def _draw_weapon_reveal(self):
+        """Briefly show the actual new drawing at readable size after equipping."""
+        from page_arsenal import draw_weapon_icon
+        profile = self.weapons.profile()
+        panel = pygame.Surface((314, 126), pygame.SRCALPHA)
+        panel.fill((247, 243, 224, 238))
+        self.renderer.rough_rect(panel, INK_LIGHT, pygame.Rect(3, 3, 308, 120), 1, 8102)
+        self.renderer.doodle_text(panel, "NOW DRAWING", (14, 10), profile.accent,
+                                  self.renderer.font_small, -1)
+        label_lines = wrap_text(profile.label, self.renderer.font_small, 157)[:2]
+        for index, line in enumerate(label_lines):
+            self.renderer.doodle_text(panel, line, (14, 38 + 20 * index), INK,
+                                      self.renderer.font_small)
+        role_y = 42 + 20 * len(label_lines)
+        role_lines = 1 if len(label_lines) > 1 else 2
+        for index, line in enumerate(wrap_text(profile.role, self.renderer.font_small, 157)[:role_lines]):
+            self.renderer.doodle_text(panel, line, (14, role_y + 20 * index), INK_LIGHT,
+                                      self.renderer.font_small)
+        pygame.draw.line(panel, INK_LIGHT, (176, 23), (176, 106), 1)
+        draw_weapon_icon(panel, self.weapons.current_id, self.level.chapter_index,
+                         (245, 66), size=94)
+        panel.set_alpha(round(255 * min(1.0, self.weapon_reveal_time / .35)))
+        self.screen.blit(panel, (WIDTH - 334, 91 if self.level.toast_time > 0 else 12))
+
     def _draw_title(self):
         self.renderer.background(self.screen, 0)
         jitter_line(self.screen, INK, (155, 280), (965, 280), 4, 82, 2, 2)
@@ -1170,6 +1244,9 @@ class Game:
         close = self.renderer.font_small.render(close_label, True, INK_LIGHT)
         self.screen.blit(close, close.get_rect(center=close_rect.center))
 
+    def _turn_achievement_page(self, delta):
+        self.achievement_page = (getattr(self, 'achievement_page', 0)+delta) % ((len(ACHIEVEMENTS)+15)//16)
+
     def _draw_achievements(self):
         self.renderer.background(self.screen, 4)
         self.renderer.doodle_text(self.screen, "ACHIEVEMENTS", (86, 52), INK,
@@ -1179,7 +1256,8 @@ class Game:
             f"{self.achievements.count} / {self.achievements.total} clipped into the notebook",
             (90, 116), INK_LIGHT, self.renderer.font_small, 1,
         )
-        for index, achievement in enumerate(ACHIEVEMENTS):
+        page = getattr(self, 'achievement_page', 0) % ((len(ACHIEVEMENTS)+15)//16)
+        for index, achievement in enumerate(ACHIEVEMENTS[page*16:(page+1)*16]):
             column, row = index % 2, index // 2
             rect = pygame.Rect(55 + column * 515, 140 + row * 54, 495, 51)
             unlocked = achievement.achievement_id in self.achievements.unlocked
@@ -1197,13 +1275,21 @@ class Game:
                                       self.renderer.font_small, -1 if index % 2 else 1)
             description = (achievement.description if unlocked else
                            "condition not written down" if achievement.hidden else
-                           "not crossed out yet")
+                           achievement.description)
             small = self.renderer.font_small.render(description, True,
                                                     INK_LIGHT if unlocked else color)
             if small.get_width() > rect.width - 60:
                 small = pygame.transform.smoothscale(small,
                     (rect.width-60, max(16, round(small.get_height()*(rect.width-60)/small.get_width()))))
             self.screen.blit(small, (rect.x + 48, rect.y + 30))
+        for direction, label, x in ((-1, "<  previous", 300), (1, "next  >", 680)):
+            button = pygame.Rect(x, 580, 140, 34)
+            self.renderer.rough_rect(self.screen, INK_LIGHT, button, 1, 7920+x)
+            text = self.renderer.font_small.render(label, True, INK)
+            self.screen.blit(text, text.get_rect(center=button.center))
+        total_pages = (len(ACHIEVEMENTS)+15)//16
+        text = self.renderer.font_small.render(f"{page+1} / {total_pages}", True, INK_LIGHT)
+        self.screen.blit(text, text.get_rect(center=(560,597)))
         close_rect = self._achievements_close_rect()
         self.renderer.rough_rect(self.screen, INK_LIGHT, close_rect, 2, 7811)
         label = ("PAD-A / PAD-B   close"

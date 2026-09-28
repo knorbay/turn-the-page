@@ -44,7 +44,7 @@ class BossIdentityContracts(unittest.TestCase):
         for _ in range(3):
             boss.invulnerable=0
             boss.hit_from_weapon(9,0,400,{"heavy"},self.ctx)
-        self.assertEqual(boss.hp,4,"one pinning accepts two hits, regardless of damage")
+        self.assertEqual(boss.hp,boss.max_hp-2,"one pinning accepts two hits, regardless of damage")
 
     def test_wanted_false_posters_take_real_shots_without_counting_kills(self):
         boss=WantedSketchBoss(600)
@@ -69,7 +69,7 @@ class BossIdentityContracts(unittest.TestCase):
         boss.facing=1;boss._set_state("rail_rush",3)
         self.assertFalse(boss.hit_from_weapon(1,0,800,{"ink"},self.ctx))
         self.assertTrue(boss.hit_from_weapon(1,0,400,{"ink"},self.ctx))
-        self.assertEqual(boss.hp,5)
+        self.assertEqual(boss.hp,boss.max_hp-1)
         cut=boss.attack_rect_for_state("rail_rush")
         self.assertEqual(cut.bottom,590)
         self.assertEqual(cut.height,43)

@@ -103,9 +103,9 @@ class SketchRewardTests(unittest.TestCase):
         self.assertFalse(sketch_active(SKETCH_BY_ID["water_tower"], ("pencil_blade",)))
         self.assertTrue(sketch_active(SKETCH_BY_ID["water_tower"], ("ink_pistol",)))
 
-    def test_english_class_notes_keep_all_twenty_diagrams_legible(self):
+    def test_english_class_notes_keep_all_thirty_diagrams_legible(self):
         annotations = NotebookAnnotations()
-        self.assertEqual(sum(map(len,LESSONS)),20)
+        self.assertEqual(sum(map(len,LESSONS)),30)
         for lessons in LESSONS:
             for lesson in lessons:
                 self.assertFalse(set("çğıöşüÇĞİÖŞÜ").intersection(" ".join(lesson)))

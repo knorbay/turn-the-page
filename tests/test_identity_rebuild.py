@@ -51,7 +51,7 @@ class IdentityRebuildContracts(unittest.TestCase):
             if page < 3:
                 self.assertGreaterEqual(runtime.end_x, 10000)
             selected += len(mandatory)
-        self.assertEqual(selected, 23)
+        self.assertEqual(selected, 25)
         self.assertEqual([build_chapter(page).end_x for page in range(3)],
                          [10950.0, 13050.0, 16750.0])
 
@@ -151,6 +151,19 @@ class IdentityRebuildContracts(unittest.TestCase):
             rendered.append(pygame.image.tostring(surface, "RGBA"))
             self.assertEqual(player.rect, reference)
         self.assertGreaterEqual(len(set(rendered)), 4)
+
+    def test_lethal_pose_breaks_the_stick_figure_before_redrawing(self):
+        player = Player(220, 500)
+        camera = Camera(WIDTH)
+        collision = player.rect.copy()
+        normal = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+        broken = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+        player.draw(normal, camera)
+        player.death_progress = .75
+        player.draw(broken, camera)
+        self.assertNotEqual(pygame.image.tostring(normal, "RGBA"),
+                            pygame.image.tostring(broken, "RGBA"))
+        self.assertEqual(player.rect, collision)
 
     def test_baby_face_revision_draws_moustache_and_signature_sword(self):
         directory, game = self.make_game()

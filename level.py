@@ -167,7 +167,9 @@ class Level:
         if self.director.tool.visible:
             player.look_target = (self.director.tool.x, self.director.tool.y)
         else:
-            player.look_target = None
+            visible_hand = next((getattr(e, 'hand', None) for e in self.entities.items
+                                 if getattr(getattr(getattr(e, 'hand', None), 'tool', None), 'visible', False)), None)
+            player.look_target = ((visible_hand.tool.x, visible_hand.tool.y) if visible_hand else None)
 
         for cp in self.runtime.checkpoints:
             if (cp.trigger_x and player.x >= cp.trigger_x and player.on_ground and
@@ -216,6 +218,8 @@ class Level:
         self.respawn_committed = False
         self.respawn_sound_played = False
         self.respawn_origin = (player.center_x, player.rect.centery)
+        player.death_progress = .001
+        player.draw_amount = 1
         game = getattr(self, "game", None)
         if game is not None:
             game.behavior.record("death", cause=self.respawn_cause,
@@ -251,15 +255,18 @@ class Level:
         redraw_end = 1.27
         if elapsed < collapse_end:
             progress = elapsed / collapse_end
-            player.redraw_alpha = max(0, 1 - progress)
-            player.draw_amount = max(.12, 1 - progress * .55)
+            player.death_progress = max(.001, progress)
+            player.redraw_alpha = 1
+            player.draw_amount = 1
         elif elapsed < commit_at:
+            player.death_progress = 0
             player.redraw_alpha = 0
             player.draw_amount = 0
         elif not self.respawn_committed:
             self.respawn_committed = True
             self.load_chapter(self.chapter_index, self.current_checkpoint, player, camera)
             player.acquire_lock("respawn")
+            player.death_progress = 0
             player.redraw_alpha = 0
             player.draw_amount = 0
             player.redraw_variant = self.respawn_variant
@@ -280,6 +287,7 @@ class Level:
                 particles.pencil_speck(tip_x, tip_y)
         if self.respawn_timer <= 0:
             self.respawn_timer = 0
+            player.death_progress = 0
             player.redraw_alpha = 1
             player.draw_amount = 1
             player.release_lock("respawn")

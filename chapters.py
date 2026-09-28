@@ -62,6 +62,8 @@ def build_chapter(index: int, discovered=None) -> ChapterRuntime:
         for entity in chapter.entities.items:
             if isinstance(entity, LostSketch):
                 entity.discovered = entity.secret_id in set(discovered or [])
+        from major_update import polish_route
+        polish_route(chapter)
         return chapter
     builders = [_prologue, _margins, _mistakes, _under_ink, _finale]
     chapter = builders[index]()
@@ -73,14 +75,31 @@ def build_chapter(index: int, discovered=None) -> ChapterRuntime:
     # preserving every authored Artist/eraser/fold event underneath it.
     from action_content import expand_action_chapter
     expand_action_chapter(chapter)
-    # Keep the large old route as a mechanics catalogue, but make the actual
-    # playable beta a curated three-page experience.
+    # Keep the older rooms as a mechanics catalogue while each playable page
+    # follows its authored route and page-specific combat identity.
     from identity_content import apply_identity_pass
     apply_identity_pass(chapter, authored_end_x)
+    if index == 0:
+        # The first quiet stretch now asks the player to make three visible
+        # marks with the Artist before the red margin can be crossed.
+        from route_puzzles import DraftBridgePuzzle
+        chapter.entities.add(DraftBridgePuzzle(chapter.world, 2850, index))
+    elif index == 1:
+        # The western canyon uses movement as the answer: reach the raised
+        # ledger ledge, then dash through a poster's dashed tear line.
+        from route_puzzles import PerforatedPosterPuzzle
+        chapter.entities.add(PerforatedPosterPuzzle(chapter.world, 10670, index))
+    elif index == 2:
+        # A fading loose star must be carried up the existing satellite steps
+        # before the drawn airlock will open.
+        from route_puzzles import SatelliteRelayPuzzle
+        chapter.entities.add(SatelliteRelayPuzzle(chapter.world, 9100, index))
     discovered = set(discovered or [])
     for entity in chapter.entities.items:
         if isinstance(entity, LostSketch) and entity.secret_id in discovered:
             entity.discovered = True
+    from major_update import polish_route
+    polish_route(chapter)
     return chapter
 
 
@@ -124,7 +143,7 @@ def _prologue():
 
     director.add(EventSequence("player_drawn", lambda ctx: True, [
         EventStep(.6, lock_player=True),
-        EventStep(2.8, update=intro_update, finish=intro_finish, lock_player=True,
+        EventStep(1.15, update=intro_update, finish=intro_finish, lock_player=True,
                   camera_x=ctx_x(220)),
         EventStep(.35, lock_player=True),
     ]))

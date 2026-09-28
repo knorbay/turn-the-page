@@ -34,6 +34,8 @@ class PaperRenderer:
             ((232, 230, 218), "carbon_underpage"),
             ((249, 246, 229), "blank_sheet"),
         ]
+        from notebook_art import NotebookMaterial
+        self.notebook = NotebookMaterial()
         self.pages = [self._make_paper(base, 11 + i * 18, style)
                       for i, (base, style) in enumerate(recipes)]
         self.page_styles = [style for _, style in recipes]
@@ -114,18 +116,50 @@ class PaperRenderer:
             self._draw_agent_backdrop(surface, camera, time)
         elif page == 4:
             self._draw_final_backdrop(surface, camera, time)
+        from notebook_sites import draw_notebook_sites
+        draw_notebook_sites(surface, camera, page, time, self)
         self.notebook_notes.draw(surface, camera, page)
+        from notebook_scenes import ZONES
+        first = math.floor(camera.x / 1600)
+        for index in range(first, first + 2):
+            x = camera.screen_x(index * 1600 + 360)
+            if -280 < x < WIDTH:
+                self.notebook.hand(surface, ZONES[page][index % len(ZONES[page])],
+                                   (x, 92), (151, 105, 87), True, index)
+
 
     def _draw_agent_backdrop(self, surface, camera, time):
         # Pale architecture is behind the page; solid playable tops are dark.
-        for i, x in self._scroll_positions(camera, 210, .23):
-            top = 230 + (i*43 % 150)
-            rect = pygame.Rect(x, top, 170, 560-top)
-            pygame.draw.rect(surface, (211, 213, 208), rect)
-            pygame.draw.rect(surface, (160, 167, 165), rect, 1)
-            for wy in range(top+18, 540, 38):
-                for wx in range(x+18, x+150, 38):
-                    pygame.draw.rect(surface, (181, 186, 178), (wx, wy, 17, 22), 1)
+        for i, x in self._scroll_positions(camera, 268, .23):
+            rng = random.Random(8700 + i)
+            top = 240 + rng.randrange(0, 135)
+            width = 158 + rng.randrange(0, 53)
+            left = x - rng.randrange(0, 22)
+            # Each tower is a crooked copy with a surviving construction line.
+            # The opaque fill keeps the native display path unchanged.
+            silhouette = [(left - 3, 561), (left + 1, top + 9),
+                          (left + width // 3, top + 4),
+                          (left + width // 3 + 10, top - 2),
+                          (left + width - 4, top + 1),
+                          (left + width + 4, 561)]
+            pygame.draw.polygon(surface, (211, 213, 208), silhouette)
+            for edge, start in enumerate(silhouette[:-1]):
+                jitter_line(surface, (158, 165, 162), start,
+                            silhouette[edge + 1], 1, 8700 + i * 11 + edge, 2, 1.5)
+            jitter_line(surface, (187, 190, 184), (left + 7, top + 8),
+                        (left + 5, 559), 1, 9100 + i, 1, 1.8)
+            for row, wy in enumerate(range(top + 25, 535, 45)):
+                for col, wx in enumerate(range(left + 21, left + width - 16, 43)):
+                    if (i + row * 3 + col) % 5 == 0:
+                        continue
+                    xx = wx + rng.randrange(-3, 4)
+                    yy = wy + rng.randrange(-2, 3)
+                    window = [(xx, yy), (xx + 18, yy + 1),
+                              (xx + 17, yy + 24), (xx - 1, yy + 23)]
+                    pygame.draw.lines(surface, (179, 184, 178), True, window, 1)
+                    if (i + row + col) % 11 == 0:
+                        pygame.draw.line(surface, (166, 170, 166),
+                                         (xx - 2, yy + 13), (xx + 21, yy + 12), 2)
         for i, x in self._scroll_positions(camera, 1550, .8):
             pygame.draw.line(surface, (146, 150, 144), (x+160, 345), (x+160, 522), 1)
             pygame.draw.polygon(surface, (183, 187, 180),
@@ -362,22 +396,27 @@ class PaperRenderer:
         pygame.draw.lines(surface, color, False, points, 1)
 
     def page_turn(self, target: pygame.Surface, current: pygame.Surface, next_page: pygame.Surface, progress: float):
-        """Simplified curl: the old sheet compresses, casts a shadow, and shows a folded edge."""
-        target.blit(next_page, (0, 0))
-        p = max(0.0, min(1.0, progress))
-        edge = round(WIDTH * (1.0 - p))
-        if edge > 3:
-            old = current.subsurface((0, 0, edge, HEIGHT))
-            target.blit(old, (0, 0))
-        shadow_w = max(3, round(48 * math.sin(p * math.pi)))
-        shadow = pygame.Surface((shadow_w, HEIGHT), pygame.SRCALPHA)
-        for x in range(shadow_w):
-            alpha = round(75 * (1 - x / shadow_w))
-            pygame.draw.line(shadow, (40, 37, 32, alpha), (x, 0), (x, HEIGHT))
-        target.blit(shadow, (edge, 0))
-        curl_w = max(0, round(170 * math.sin(p * math.pi)))
-        if curl_w:
-            curl = [(edge, 0), (min(WIDTH, edge + curl_w), HEIGHT // 2), (edge, HEIGHT)]
-            pygame.draw.polygon(target, (224, 219, 198), curl)
-            pygame.draw.line(target, (112, 106, 94), (edge, 0), (min(WIDTH, edge + curl_w), HEIGHT // 2), 2)
-            pygame.draw.line(target, (112, 106, 94), (min(WIDTH, edge + curl_w), HEIGHT // 2), (edge, HEIGHT), 2)
+        """A bent sheet with mirrored reverse-side ink and a moving soft shadow."""
+        p=max(0.0,min(1.0,progress))
+        if p<=0: target.blit(current,(0,0)); return
+        target.blit(next_page,(0,0))
+        if p>=1:return
+        edge=round(WIDTH*(1-p))
+        if edge>0:target.blit(current,(0,0),pygame.Rect(0,0,edge,HEIGHT))
+        curl_w=max(1,round(220*math.sin(p*math.pi)))
+        shadow=pygame.Surface((curl_w+65,HEIGHT),pygame.SRCALPHA)
+        for x in range(shadow.get_width()):
+            alpha=round(78*math.sin(p*math.pi)*(1-x/shadow.get_width())**1.4)
+            pygame.draw.line(shadow,(45,37,30,alpha),(x,0),(x,HEIGHT))
+        target.blit(shadow,(edge,0))
+        for offset in range(0,curl_w,4):
+            u=offset/curl_w
+            sx=max(0,min(WIDTH-4,edge-round(u*curl_w*.9)))
+            stripe=pygame.transform.flip(current.subsurface((sx,0,4,HEIGHT)),True,False).copy()
+            veil=pygame.Surface(stripe.get_size());veil.fill((240,234,212));veil.set_alpha(213)
+            stripe.blit(veil,(0,0))
+            bend=round(math.sin(u*math.pi)*54*math.sin(p*math.pi))
+            h=max(10,HEIGHT-2*bend)
+            target.blit(pygame.transform.smoothscale(stripe,(4,h)),(edge+offset,bend))
+        points=[(edge+u*curl_w,math.sin(u*math.pi)*54*math.sin(p*math.pi)) for u in (0,.2,.4,.6,.8,1)]
+        pygame.draw.lines(target,(155,146,125),False,points,1)

@@ -18,6 +18,7 @@ class InputFrame:
     aim_x: float | None = None
     aim_y: float | None = None
     pause: bool = False
+    down: bool = False
 
     @property
     def axis(self):

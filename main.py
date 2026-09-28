@@ -8,7 +8,7 @@ import pygame
 
 from game import Game
 from runtime_paths import resource_path
-from settings import HEIGHT, TITLE, WIDTH
+from settings import HEIGHT, TITLE, WIDTH, VERSION
 
 
 def main():
@@ -21,7 +21,7 @@ def main():
         except pygame.error:
             pass
     screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.RESIZABLE)
-    pygame.display.set_caption(TITLE)
+    pygame.display.set_caption(f"{TITLE} — {VERSION}")
     try:
         Game(screen).run()
     finally:

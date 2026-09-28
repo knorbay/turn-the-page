@@ -14,6 +14,17 @@ class Achievement:
 
 
 ACHIEVEMENTS = (
+    Achievement("first_draft", "A SAFE FIRST DRAFT", "Cross out the opening practice drawing."),
+    Achievement("heard_you", "I CAN HEAR YOU", "Reply to the Artist's margin note."),
+    Achievement("conversation", "A SMALL CONVERSATION", "Reply to the Artist five times."),
+    Achievement("first_revision", "A LINE OF YOUR OWN", "Solve a physical page puzzle."),
+    Achievement("three_revisions", "REWRITE THE ROUTE", "Solve all three page route puzzles."),
+    Achievement("bestiary", "FIELD NOTES", "Defeat twelve different enemy kinds."),
+    Achievement("new_ink", "UNFAMILIAR INK", "Defeat a Fold Duelist, Margin Sniper and Split Lantern."),
+    Achievement("full_sketchbook", "EVERY LOST LINE", "Collect all twelve Lost Sketches."),
+    Achievement("six_signatures", "SIX SIGNATURES", "Defeat all six named bosses."),
+    Achievement("ten_returns", "POST OFFICE", "Perfectly return ten incoming shots."),
+    Achievement("twenty_rooms", "MARGIN EXPLORER", "Clear twenty encounters."),
     Achievement("first_crossout", "FIRST CROSS-OUT", "Defeat the first hostile doodle."),
     Achievement("margin_runner", "BRAVEMAN",
                 "Reach a page turn while avoiding more than attacking.", True),
@@ -60,6 +71,25 @@ class AchievementTracker:
         boss_times = data.get("boss_clear_seconds", {})
         enemy_defeats = data.get("enemy_defeats", {})
         weapon_uses = data.get("weapon_uses", {})
+        rules = {
+            "first_draft": behavior.count("practice_complete") >= 1,
+            "heard_you": behavior.count("artist_reply") >= 1,
+            "conversation": behavior.count("artist_reply") >= 5,
+            "first_revision": len(set(data.get("puzzles_solved", ()))) >= 1,
+            "three_revisions": {"first_page_draft", "wanted_perforation",
+                                "satellite_relay"}.issubset(data.get("puzzles_solved", ())),
+            "bestiary": sum(int(n) > 0 for n in enemy_defeats.values()) >= 12,
+            "new_ink": all(int(enemy_defeats.get(k, 0)) > 0 for k in
+                           ("fold_duelist", "margin_sniper", "split_lantern")),
+            "full_sketchbook": len(set(game.save.data.get("secrets", ()))) >= 12,
+            "six_signatures": {"moon_compass", "wanted_sketch", "railroad_stapler",
+                               "orbital_mistake", "scissor_director", "final_editor"}.issubset(boss_times),
+            "ten_returns": behavior.count("perfect_return") >= 10,
+            "twenty_rooms": behavior.count("arena_clear") >= 20,
+        }
+        for key, earned in rules.items():
+            if earned:
+                self.unlock(key)
         if behavior.count("enemies_defeated") >= 1:
             self.unlock("first_crossout")
         if (behavior.count("pages_completed") >= 1

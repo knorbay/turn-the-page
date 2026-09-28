@@ -16,6 +16,8 @@ from combat import CombatArena, DoodleEnemy
 from identity_content import REQUIRED_SLICE_ENCOUNTERS
 from paper_puzzles import CarbonTransferPuzzle, CreaseWeavePuzzle
 from puzzles import GlyphLockPuzzle, InkCircuitPuzzle
+from route_puzzles import (DraftBridgePuzzle, PerforatedPosterPuzzle,
+                           SatelliteRelayPuzzle)
 from save_system import SaveSystem
 from settings import HEIGHT, WIDTH
 
@@ -313,6 +315,8 @@ class PaperStoryTests(unittest.TestCase):
                         "cactus_gunner": "ink_pistol", "comet_hound": "rubber_band",
                         "gutter_lantern": "ink_pistol", "rake_cactus": "ink_pistol",
                         "ember_hound": "rubber_band",
+                        "ink_clone": "ink_pistol", "fold_duelist": "pencil_blade", "margin_sniper": "ink_pistol",
+                        "split_lantern": "ink_pistol",
                         "moon_compass": "pencil_blade", "wanted_sketch": "ink_pistol",
                         "railroad_stapler": "marker_shotgun",
                         "orbital_mistake": "eraser_cannon",
@@ -368,7 +372,7 @@ class PaperStoryTests(unittest.TestCase):
                         "charge_telegraph", "sweep_telegraph", "snap_telegraph",
                         "boss_telegraph", "pattern_telegraph",
                         "stomp_warn", "sweep_warn",
-                        "sheath", "snicker", "quickdraw", "rustle", "lock", "scan", "charge",
+                        "echo_telegraph", "sheath", "snicker", "quickdraw", "rustle", "lock", "scan", "charge",
                         "flare", "prickle", "tail_warn", "ram_warn", "agent_aim", "cut_warn", "drop_warn",
                         "bounty_draw", "rail_whistle", "return_whistle", "return_telegraph", "cross_warn", "staple_columns_warn",
                         "moon_release_warn", "meteor_warn",
@@ -394,7 +398,7 @@ class PaperStoryTests(unittest.TestCase):
                         "crossout", "charge", "thrust", "dive", "slam",
                         "erase_slam", "sweep", "snap",
                         "stomp",
-                        "draw_cut", "pounce", "roll", "ram", "comet_dash",
+                        "echo_slash", "draw_cut", "pounce", "roll", "ram", "comet_dash",
                         "counter_cut", "red_stamp", "shear", "drop",
                         "rail_rush", "meteor_fall",
                     }
@@ -459,7 +463,7 @@ class PaperStoryTests(unittest.TestCase):
                         abs(e.x-player.center_x)<180 for e in arena.enemies) or
                     any(e.state in ("rail_whistle", "return_whistle") and e.state_time < .22 for e in arena.enemies) or
                     any(enemy.state in ("telegraph", "slam_telegraph", "sweep_telegraph", "return_telegraph")
-                        or (enemy.kind == "eraser_brute" and
+                        or (enemy.kind in ("eraser_brute", "carbon_stamper") and
                             (enemy.state in ("slam", "recover")
                              or bool(getattr(enemy, "_temporary_erases", ()))))
                         or (enemy.kind == "artist_mistake" and
@@ -468,60 +472,133 @@ class PaperStoryTests(unittest.TestCase):
                         for enemy in arena.enemies)
                 )
             else:
-                puzzle = next((entity for entity in game.level.entities.items
+                draft = next((entity for entity in game.level.entities.items
+                              if isinstance(entity, DraftBridgePuzzle) and not entity.completed
+                              and entity.start_x - 130 < player.x < entity.gate.x2 + 25), None)
+                if draft:
+                    mark_x, mark_bottom = draft.marks[min(draft.phase, 2)]
+                    distance = mark_x - player.center_x
+                    # Follow the numbered marks. The second is above the
+                    # newly drawn, collidable ledge and requires a real jump.
+                    if draft.phase != 3:
+                        left, right = distance < -13, distance > 13
+                        interact = (abs(distance) <= 13 and
+                                    abs(player.rect.bottom - mark_bottom) <= 50)
+                        jump = (draft.phase == 1 and player.on_ground and
+                                abs(distance) < 185 and
+                                player.rect.bottom > mark_bottom + 25 and
+                                draft.ledge.draw_progress >= .95)
+                    else:
+                        left = right = False
+                else:
+                    puzzle = next((entity for entity in game.level.entities.items
                                if isinstance(entity, (GlyphLockPuzzle, InkCircuitPuzzle,
                                                       CreaseWeavePuzzle, CarbonTransferPuzzle)) and
                                not entity.completed and player.x > entity.x - 100 and
                                player.x < entity.gate.x1 + 10), None)
-                if puzzle:
-                    if isinstance(puzzle, GlyphLockPuzzle):
-                        index = next((i for i in range(3) if puzzle.values[i] != puzzle.target[i]), None)
-                        target_x = puzzle.x + index * 86 - 12 if index is not None else player.x
-                    elif isinstance(puzzle, InkCircuitPuzzle):
-                        index = circuit_move(puzzle.state, puzzle.target)
-                        target_x = puzzle.x + index * 95 - 12 if index is not None else player.x
-                    elif isinstance(puzzle, CreaseWeavePuzzle):
-                        index = crease_move(puzzle.states, puzzle.target)
-                        target_x = puzzle.stations[index][0] - 12 if index is not None else player.x
-                    elif puzzle.phase == "reveal":
-                        index = next((i for i, rubbed in enumerate(puzzle.rubbed) if not rubbed), None)
-                        target_x = puzzle.stations[index][0] - 12 if index is not None else player.x
-                    elif puzzle.phase == "turn":
-                        index = 0
-                        target_x = puzzle.turn_position[0] - 12
+                    if puzzle:
+                        if isinstance(puzzle, GlyphLockPuzzle):
+                            index = next((i for i in range(3) if puzzle.values[i] != puzzle.target[i]), None)
+                            target_x = puzzle.x + index * 86 - 12 if index is not None else player.x
+                        elif isinstance(puzzle, InkCircuitPuzzle):
+                            index = circuit_move(puzzle.state, puzzle.target)
+                            target_x = puzzle.x + index * 95 - 12 if index is not None else player.x
+                        elif isinstance(puzzle, CreaseWeavePuzzle):
+                            index = crease_move(puzzle.states, puzzle.target)
+                            target_x = puzzle.stations[index][0] - 12 if index is not None else player.x
+                        elif puzzle.phase == "reveal":
+                            index = next((i for i, rubbed in enumerate(puzzle.rubbed) if not rubbed), None)
+                            target_x = puzzle.stations[index][0] - 12 if index is not None else player.x
+                        elif puzzle.phase == "turn":
+                            index = 0
+                            target_x = puzzle.turn_position[0] - 12
+                        else:
+                            index = puzzle.solution[len(puzzle.transfer_order)]
+                            target_x = puzzle.stations[index][0] - 12
+                        if index is not None:
+                            distance = target_x - player.x
+                            left, right, interact = distance < -12, distance > 12, abs(distance) <= 12
+                            if isinstance(puzzle, CreaseWeavePuzzle):
+                                jump = player.on_ground and abs(distance) > 24
                     else:
-                        index = puzzle.solution[len(puzzle.transfer_order)]
-                        target_x = puzzle.stations[index][0] - 12
-                    if index is not None:
-                        distance = target_x - player.x
-                        left, right, interact = distance < -12, distance > 12, abs(distance) <= 12
-                        if isinstance(puzzle, CreaseWeavePuzzle):
-                            jump = player.on_ground and abs(distance) > 24
-                else:
-                    wait = ((chapter == 2 and 5600 < player.x < 5740 and
-                             "blot_on_switch" not in game.level.flags))
-                    right = not wait
-                    interact = chapter == 3 and (
-                        (1050 < player.x < 1220 and game.level.world.active_layer == 0) or
-                        (3880 < player.x < 4100 and game.level.world.active_layer == 1)
-                    )
-                    zones = list(ROUTE_JUMPS[chapter])
-                    zones.extend((platform.x1 - 150, platform.x1 - 25)
-                                 for platform in game.level.world.platforms
-                                 if platform.name.startswith("room_"))
-                    zones.extend((flap.x1 - 150, flap.x1 - 25)
-                                 for entity in game.level.entities.items
-                                 if isinstance(entity, CreaseWeavePuzzle)
-                                 for flap in entity.flaps)
-                    zones.extend((zone.rect.x - 48, zone.rect.x - 5)
-                                 for zone in game.level.world.zones if zone.kind == "ink_hazard")
-                    jump = player.on_ground and (
-                        any(a < player.x < b for a, b in zones)
-                        or (right and abs(player.vx) < 8)
-                    )
+                        wait = ((chapter == 2 and 5600 < player.x < 5740 and
+                                 "blot_on_switch" not in game.level.flags))
+                        right = not wait
+                        interact = chapter == 3 and (
+                            (1050 < player.x < 1220 and game.level.world.active_layer == 0) or
+                            (3880 < player.x < 4100 and game.level.world.active_layer == 1)
+                        )
+                        zones = list(ROUTE_JUMPS[chapter])
+                        zones.extend((platform.x1 - 150, platform.x1 - 25)
+                                     for platform in game.level.world.platforms
+                                     if platform.name.startswith("room_"))
+                        zones.extend((flap.x1 - 150, flap.x1 - 25)
+                                     for entity in game.level.entities.items
+                                     if isinstance(entity, CreaseWeavePuzzle)
+                                     for flap in entity.flaps)
+                        zones.extend((zone.rect.x - 48, zone.rect.x - 5)
+                                     for zone in game.level.world.zones if zone.kind == "ink_hazard")
+                        jump = player.on_ground and (
+                            any(a < player.x < b for a, b in zones)
+                            or (right and abs(player.vx) < 8)
+                        )
+            if not arena:
+                poster = next((entity for entity in game.level.entities.items
+                               if isinstance(entity, PerforatedPosterPuzzle)
+                               and not entity.completed
+                               and entity.ledge.x1 - 160 < player.x < entity.gate.x2 + 25), None)
+                if poster:
+                    center = player.center_x
+                    left = right = interact = jump = dash = False
+                    if player.rect.bottom > poster.ledge.y + 35:
+                        # The seam is deliberately above a floor-level dash.
+                        # First reach the authored torn-paper shelf.
+                        if center < poster.ledge.x1 + 34:
+                            right = True
+                        elif center > poster.ledge.x1 + 55:
+                            left = True
+                        else:
+                            jump = player.on_ground
+                    elif not player.on_ground:
+                        right = center < poster.gate.x1 - 52
+                    elif center < poster.gate.x1 - 52:
+                        right = True
+                    else:
+                        right = True
+                        dash = player.dash_ready
+                relay = next((entity for entity in game.level.entities.items
+                              if isinstance(entity, SatelliteRelayPuzzle)
+                              and not entity.completed
+                              and entity.start_x - 100 < player.x < entity.gate.x2 + 25), None)
+                if relay:
+                    center = player.center_x
+                    left = right = interact = jump = dash = False
+                    if relay.phase == "idle":
+                        distance = relay.source[0] - center
+                        left, right = distance < -10, distance > 10
+                        interact = (abs(distance) <= 10 and player.on_ground
+                                    and abs(player.rect.bottom - relay.source[1]) <= 36)
+                    elif player.on_ground and abs(player.rect.bottom - relay.receiver[1]) <= 4:
+                        distance = relay.receiver[0] - center
+                        left, right = distance < -12, distance > 12
+                        interact = abs(distance) <= 12
+                    elif player.on_ground and abs(player.rect.bottom - 500) <= 4:
+                        right = center < relay.receiver[0] - 5
+                        jump = center >= 9480
+                    elif player.on_ground and player.rect.bottom >= 550:
+                        right = center < relay.receiver[0] - 5
+                        jump = center >= 9255
+                    else:
+                        right = center < relay.receiver[0] - 5
+            # Deliberately leave a high landing to use a short blade on the floor.
+            down = bool(arena and arena.enemies and player.on_ground
+                        and target.y-player.rect.bottom > 50
+                        and (preferred in ('pencil_blade','excalibur')
+                             or target.kind=='orbital_mistake'))
+            if down: jump = True
             before = game.level.respawn_timer
             game.update(1 / 60, InputFrame(left=left, right=right, jump_pressed=jump,
-                                           jump_held=jump, interact=interact,
+                                           jump_held=jump, interact=interact, down=down,
                                            # The deterministic driver taps as
                                            # soon as a weapon is ready.  Live
                                            # hold-to-repeat remains a property
@@ -543,7 +620,9 @@ class PaperStoryTests(unittest.TestCase):
             for entity in game.level.entities.items:
                 if isinstance(entity, CombatArena) and entity.completed:
                     cleared.add(entity.arena_id)
-                if isinstance(entity, (CreaseWeavePuzzle, CarbonTransferPuzzle)) and entity.completed:
+                if isinstance(entity, (CreaseWeavePuzzle, CarbonTransferPuzzle,
+                                       DraftBridgePuzzle, PerforatedPosterPuzzle,
+                                       SatelliteRelayPuzzle)) and entity.completed:
                     solved_paper.add(entity.puzzle_id)
         self.assertEqual(game.state, "ending",
                          (game.level.chapter_index, round(game.player.x), round(game.player.y),
@@ -566,7 +645,8 @@ class PaperStoryTests(unittest.TestCase):
         self.assertLessEqual(falls, 20, fall_log)
         required = {arena_id for ids in REQUIRED_SLICE_ENCOUNTERS.values() for arena_id in ids}
         self.assertEqual(cleared, required)
-        self.assertEqual(solved_paper, set())
+        self.assertEqual(solved_paper, {"first_page_draft", "wanted_perforation",
+                                        "satellite_relay"})
         self.assertTrue(game.save.data["completed"])
         if os.environ.get("PAPER_STORY_ROUTE_METRICS"):
             print(f"canonical_simulation_seconds={game.session_seconds:.2f} falls={falls}")

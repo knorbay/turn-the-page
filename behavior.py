@@ -29,6 +29,7 @@ DEFAULT_BEHAVIOR = {
     "enemy_defeats": {},
     "boss_clear_seconds": {},
     "page_clear_seconds": {},
+    "puzzles_solved": [],
     "final_scenario": "",
     "combat_motion": {"seconds": 0.0, "close_seconds": 0.0,
                       "retreat_seconds": 0.0, "distance": 0.0},
@@ -54,6 +55,11 @@ class BehaviorLedger:
         recent = snapshot.get("recent", [])
         if isinstance(recent, list):
             self.data["recent"] = [entry for entry in recent[-16:] if isinstance(entry, dict)]
+        solved = snapshot.get("puzzles_solved", [])
+        if isinstance(solved, list):
+            self.data["puzzles_solved"] = list(dict.fromkeys(
+                self._key(puzzle) for puzzle in solved if isinstance(puzzle, str)
+            ))[:32]
         scenario = snapshot.get("final_scenario", "")
         if isinstance(scenario, str):
             self.data["final_scenario"] = scenario
@@ -66,6 +72,11 @@ class BehaviorLedger:
 
     def record(self, event, **details):
         event = self._key(event)
+        if event == "puzzle_solved":
+            puzzle = self._key(details.get("puzzle_id"))
+            if puzzle in self.data["puzzles_solved"]:
+                return
+            self.data["puzzles_solved"].append(puzzle)
         counts = self.data["counts"]
         count_key = {
             "death": "deaths",

@@ -55,7 +55,7 @@ class PageArsenalContracts(unittest.TestCase):
         self.assertEqual(restored.current.ammo,2)
         self.assertEqual(restored.unlocked,{"pencil_blade","ink_pistol"})
         restored.configure_page(3)
-        self.assertEqual(restored.current.mag_size,9)
+        self.assertEqual(restored.current.mag_size,8)
         self.assertEqual(restored.unlocked,{"pencil_blade","ink_pistol"})
         self.assertEqual(restored.label_for(),"SUPPRESSED PISTOL")
 
@@ -69,7 +69,7 @@ class PageArsenalContracts(unittest.TestCase):
                 system.update(1/60,ctx,[])
             results.append((count,ctx.player.vx,system.current.ammo))
         self.assertEqual(results[0][0],4)
-        self.assertEqual(results[1][0],6)
+        self.assertEqual(results[1][0],5)
         self.assertLess(results[0][1],-60,"revolver should have a physical recoil impulse")
         self.assertEqual(results[1][1],0,"silenced pistol lets a running agent keep momentum")
         self.assertEqual(results[0][2],2)
@@ -138,7 +138,7 @@ class PageArsenalContracts(unittest.TestCase):
         self.assertEqual(system.projectiles[0].pierce,1)
         self.assertAlmostEqual(system.projectiles[0].vx,960*1.2)
         system.reload()
-        self.assertAlmostEqual(system.current.reload_timer,1.12*.85)
+        self.assertAlmostEqual(system.current.reload_timer,1.32*.85)
         system,ctx=self.setup_weapon(2,"rubber_band")
         ctx.player.sketch_rubber_bounces=1
         ctx.player.sketch_rubber_lifetime=1.25
@@ -305,6 +305,26 @@ class PageArsenalContracts(unittest.TestCase):
             for weapon_id in ("ink_pistol","marker_shotgun","eraser_cannon","rubber_band","excalibur"):
                 draw_weapon_icon(surface,weapon_id,page,(50,50))
         self.assertEqual(len(set(images)),5)
+
+    def test_pickup_icons_keep_full_readable_outlines_across_weapon_families(self):
+        tools = ((0,"pencil_blade"),(1,"ink_pistol"),(1,"marker_shotgun"),
+                 (2,"eraser_cannon"),(2,"rubber_band"),(3,"carbon_lance"),
+                 (0,"folded_shuriken"),(1,"chalk_bomb"),(0,"margin_maul"),
+                 (4,"excalibur"))
+        signatures = []
+        for page, weapon_id in tools:
+            with self.subTest(weapon=weapon_id):
+                surface = pygame.Surface((110,110),pygame.SRCALPHA)
+                draw_weapon_icon(surface,weapon_id,page,(55,55),size=70)
+                bounds = surface.get_bounding_rect()
+                self.assertGreater(bounds.width,20)
+                self.assertGreater(bounds.height,9)
+                self.assertGreaterEqual(bounds.left,3)
+                self.assertLessEqual(bounds.right,107)
+                self.assertGreaterEqual(bounds.top,3)
+                self.assertLessEqual(bounds.bottom,107)
+                signatures.append(pygame.image.tobytes(surface,"RGBA"))
+        self.assertEqual(len(set(signatures)),len(tools))
 
     def test_aiming_left_mirrors_firearms_without_turning_grips_upside_down(self):
         for page,weapon_id in ((1,"ink_pistol"),(1,"marker_shotgun"),(2,"rubber_band"),

@@ -36,6 +36,13 @@ class LostSketch(Entity):
         self.acquired_time = max(0, self.acquired_time-dt)
         self.near = abs(ctx.player.center_x - self.x) < 62 and abs(ctx.player.rect.bottom - self.y) < 95
         sketch = sketch_for(self.secret_id)
+        trial = getattr(self, 'trial', None)
+        if trial is not None and not trial.completed and not self.discovered:
+            if self.near:
+                ctx.level.interaction_hint = ('Defeat the rejected drawing below' if trial.encounter_active
+                                              else 'E  challenge the drawing / optional')
+                if interact:trial.begin(ctx)
+            return
         if self.near and not self.discovered:
             ctx.level.interaction_hint = (f"E  learn {sketch.technique.lower()}" if sketch else
                                           "E  examine lost sketch")
@@ -84,7 +91,10 @@ class LostSketch(Entity):
         surface.blit(renderer.font_small.render(label,True,accent),(card.x+12,card.y+9))
         for index,line in enumerate(wrap_text(sketch.benefit,renderer.font_small,width-24)):
             surface.blit(renderer.font_small.render(line,True,INK),(card.x+12,card.y+34+index*19))
-        prompt = "Clipped into BACK PAGES" if self.discovered else "E  keep this drawing"
+        trial = getattr(self, 'trial', None)
+        prompt = ("Clipped into BACK PAGES" if self.discovered else
+                  "SEALED / finish the margin challenge" if trial and not trial.completed else
+                  "E  keep this drawing")
         surface.blit(renderer.font_small.render(prompt,True,INK_LIGHT),(card.x+12,card.y+70))
 
 

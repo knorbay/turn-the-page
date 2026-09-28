@@ -183,9 +183,21 @@ class InkPlatform:
             elif style == "handwriting":
                 jitter_line(surface, ink, (sx1, y1), (sx2, y2),
                             3, self.seed, 2, 1.5)
-                for loop_x in range(sx1 + 25, sx2 - 15, 48):
+                for loop_index, loop_x in enumerate(range(sx1 + 25, sx2 - 15, 48)):
+                    # The support line is a chain of individual pencil tries,
+                    # not a repeated stamp. Its imperfections stay fixed as
+                    # the camera moves, so the paper never appears to shimmer.
+                    loop = random.Random(self.seed * 131 + round(a) * 11 + loop_index * 97)
+                    loop_x += loop.randint(-5, 5)
+                    loop_y = y1 - 18 + loop.randint(-4, 3)
+                    loop_w, loop_h = loop.randint(25, 35), loop.randint(18, 24)
                     pygame.draw.arc(surface, INK_LIGHT,
-                                    (loop_x, y1 - 18, 30, 21), 0, math.tau, 1)
+                                    (loop_x, loop_y, loop_w, loop_h),
+                                    .12, math.tau - loop.uniform(.08, .34), 1)
+                    if loop_index % 5 == 2:
+                        pygame.draw.arc(surface, (139, 135, 125),
+                                        (loop_x + 2, loop_y + 2, loop_w - 1, loop_h),
+                                        .34, math.pi * 1.3, 1)
             elif style == "annotation":
                 jitter_line(surface, (69, 68, 65), (sx1, y1), (sx2, y2),
                             4, self.seed, 2, 1.8)

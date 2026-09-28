@@ -30,6 +30,10 @@ WEAPON_ORDER = (
     "eraser_cannon",
     "rubber_band",
     "excalibur",
+    "margin_maul",
+    "carbon_lance",
+    "folded_shuriken",
+    "chalk_bomb",
 )
 
 WEAPON_ALIASES = {
@@ -48,6 +52,10 @@ WEAPON_ALIASES = {
 }
 
 WEAPON_NAMES = {
+    "carbon_lance": "CARBON RIFLE",
+    "folded_shuriken": "RETURNING FOLD",
+    "chalk_bomb": "CHALK CAPSULE",
+    "margin_maul": "OVERSIZED PENCIL",
     "pencil_blade": "PENCIL BLADE",
     "ink_pistol": "INK PISTOL",
     "marker_shotgun": "MARKER SHOTGUN",
@@ -145,6 +153,12 @@ class ImpactMark:
             for _ in range(5):
                 ox, oy = rng.randint(-radius, radius), rng.randint(-radius // 2, radius // 2)
                 pygame.draw.rect(surface, (177,153,140,alpha), (x + ox, y + oy, 4, 2), border_radius=1)
+        elif self.kind == "chalk_bomb":
+            pygame.draw.circle(surface,(229,225,205,alpha),(x,y),radius,2)
+            for index in range(8):
+                angle = index*math.tau/8
+                pygame.draw.line(surface,(111,117,111,alpha),(x+math.cos(angle)*radius*.45,y+math.sin(angle)*radius*.45),
+                                 (x+math.cos(angle)*radius,y+math.sin(angle)*radius),2)
         elif self.kind == "marker":
             pygame.draw.circle(surface, (48,48,57,alpha), (x, y), radius, 2)
             pygame.draw.circle(surface, (86,82,91,alpha), (x - 2, y - 2), max(1, radius // 3), 1)
@@ -255,6 +269,7 @@ class MeleeSwing:
         facing = 1 if self.direction.x >= 0 else -1
         base = math.atan2(self.direction.y, self.direction.x)
         strokes = {
+            "pencil_maul": {1: (-1.8, 1.1), 2: (-1.8, 1.1), 3: (-1.8, 1.1)},
             "katana": {1: (-.38, .28), 2: (.34, -.24), 3: (.88, -1.08)},
             "bowie": {1: (-.58, .24), 2: (.44, -.22), 3: (-.82, .48)},
             "ion_blade": {1: (-1.22, .86), 2: (1.12, -.96), 3: (-1.58, 1.18)},
@@ -301,6 +316,8 @@ class PaperProjectile:
     trail: list[tuple[float, float]] = field(default_factory=list)
     visual: str = ""
     ricochet_loss: float = .84
+    launch_support: tuple | None = None
+    support_checked: bool = False
 
     @property
     def rect(self):
@@ -310,9 +327,31 @@ class PaperProjectile:
     def update(self, dt, ctx, enemies, solids, system):
         if not self.active:
             return
+        if not self.support_checked:
+            self.support_checked = True
+            if self.kind != "rubber_band":
+                self.launch_support = next((tuple(solid) for solid in solids
+                    if solid.height <= 21 and solid.top < 580
+                    and abs(solid.top-system.player.rect.bottom) <= 3
+                    and solid.left <= system.player.center_x <= solid.right), None)
+        if self.visual == "fold_star":
+            if self.age >= .42:
+                if not getattr(self, "returning", False):
+                    self.returning = True
+                    self.hit_ids.clear()
+                home = pygame.Vector2(system.player.center_x-self.x, system.player.rect.centery-self.y)
+                if home.length() < 23:
+                    self.active = False
+                    return
+                velocity = home.normalize()*650
+                self.vx, self.vy = velocity.x, velocity.y
+                # A returning fold slips over drawn platform edges, never through enemies.
+                solids = ()
         self.age += dt
         self.life -= dt
         if self.life <= 0:
+            if self.kind == "chalk_bomb":
+                self._detonate(ctx,enemies,system)
             self.active = False
             return
         speed = max(1, math.hypot(self.vx, self.vy))
@@ -332,9 +371,17 @@ class PaperProjectile:
             if self.erase_radius:
                 self._erase_hostile_projectiles(enemies, ctx, system)
 
-            collision = next((solid for solid in solids if self.rect.colliderect(solid)), None)
+            collision = next((solid for solid in solids if self.rect.colliderect(solid)
+                              and tuple(solid) != self.launch_support), None)
             if collision is not None:
-                if self.kind == "rubber_band" and self.bounces > 0:
+                if self.kind == "chalk_bomb":
+                    self._detonate(ctx,enemies,system)
+                    break
+                elif self.visual == "fold_star":
+                    self.x, self.y = old_x, old_y
+                    self.age = max(self.age, .42)
+                    break
+                elif self.kind == "rubber_band" and self.bounces > 0:
                     self._ricochet(collision, old_x, old_y, ctx, system)
                 else:
                     self.active = False
@@ -346,6 +393,9 @@ class PaperProjectile:
                 rect = _enemy_rect(enemy)
                 if identity in self.hit_ids or rect is None or not self.rect.colliderect(rect):
                     continue
+                if self.kind == "chalk_bomb":
+                    self._detonate(ctx,enemies,system)
+                    break
                 self.hit_ids.add(identity)
                 direction = 1 if self.vx >= 0 else -1
                 applied = system.damage_enemy(
@@ -363,10 +413,30 @@ class PaperProjectile:
                     _call(ctx, "sounds", "play", "paper_step")
                 elif self.pierce > 0:
                     self.pierce -= 1
-                    self.damage *= .72
+                    if self.visual != "fold_star":
+                        self.damage *= .72
                 else:
                     self.active = False
                 break
+
+    def _detonate(self, ctx, enemies, system):
+        if not self.active:
+            return
+        self.active = False
+        center = pygame.Vector2(self.x,self.y)
+        for enemy in enemies:
+            rect = _enemy_rect(enemy)
+            if rect is None:
+                continue
+            near = pygame.Vector2(rect.center).distance_to(center) <= 82
+            if near:
+                system.damage_enemy(enemy,.85,1 if rect.centerx>=self.x else -1,
+                                    115,.15,"chalk_bomb",ctx,
+                                    source_x=self.x)
+        system.impact(self.x,self.y,"chalk_bomb",31)
+        _call(ctx,"particles","paper_puff",self.x,self.y,9)
+        _call(ctx,"sounds","play","paper_break")
+        _call(ctx,"camera","kick",2.2,.10)
 
     def _ricochet(self, solid, old_x, old_y, ctx, system):
         old = pygame.Rect(round(old_x - self.radius), round(old_y - self.radius),
@@ -412,6 +482,18 @@ class PaperProjectile:
 
     def draw(self, surface, camera):
         if not self.active:
+            return
+        if self.visual == "fold_star":
+            from page_arsenal import draw_weapon
+            draw_weapon(surface,"folded_shuriken",None,
+                        (camera.screen_x(self.x),round(self.y+camera.offset_y)),
+                        self.age*19, .55)
+            return
+        if self.kind == "chalk_bomb":
+            x,y=camera.screen_x(self.x),round(self.y+camera.offset_y)
+            pygame.draw.circle(surface,(238,232,204),(x,y),self.radius)
+            pygame.draw.circle(surface,(79,83,79),(x,y),self.radius,2)
+            pygame.draw.line(surface,(129,139,131),(x-4,y-3),(x+4,y+3),2)
             return
         points = [(camera.screen_x(x), round(y + camera.offset_y)) for x, y in self.trail]
         if len(points) > 1:
@@ -597,7 +679,7 @@ class PencilBlade(BaseWeapon):
         if style == "redraw_pencil":
             echo_from = strike_to + .055
             echo_to = echo_from + (.075 if combo < 3 else .105)
-            echo_damage = {1: .55, 2: .60, 3: .70}[combo]
+            echo_damage = {1: .35, 2: .40, 3: .45}[combo]
             duration = max(duration, echo_to + .055)
         system.melee = MeleeSwing(combo, system.aim_direction, duration,
                                   active_from, strike_to,
@@ -763,6 +845,65 @@ class RubberBand(BaseWeapon):
         return True
 
 
+class CarbonLance(BaseWeapon):
+    """A single penetrating round; reload and recoil prevent pistol-like spam."""
+    weapon_id = "carbon_lance"
+    label = "CARBON RIFLE"
+    mag_size = 1
+    reload_time = 1.8
+    fire_delay = 1.0
+
+    def fire(self, system, ctx):
+        direction = system.aim_direction
+        origin = system.muzzle(38)
+        system.projectiles.append(PaperProjectile(
+            "ink", origin.x, origin.y, direction.x*1120, direction.y*1120,
+            1.8, 5, .9, 185, .15, pierce=3, seed=system.next_seed()))
+        system.player.vx -= direction.x*145
+        system.muzzle_flash("ink", origin, 21)
+        _call(ctx, "sounds", "play", "cannon")
+        _call(ctx, "camera", "kick", 4.5, .15)
+        return True
+
+
+class ReturningFold(BaseWeapon):
+    """One folded star: position yourself to cut a second line on its return."""
+    weapon_id = "folded_shuriken"
+    label = "RETURNING FOLD"
+    fire_delay = .85
+
+    def fire(self, system, ctx):
+        if any(p.active and p.visual == "fold_star" for p in system.projectiles):
+            return False
+        direction = system.aim_direction
+        origin = system.muzzle(20)
+        system.projectiles.append(PaperProjectile(
+            "ink", origin.x, origin.y, direction.x*590, direction.y*590,
+            .7, 9, 2.3, 70, .04, pierce=99, visual="fold_star", seed=system.next_seed()))
+        _call(ctx, "sounds", "play", "rubber")
+        return True
+
+
+class ChalkBomb(BaseWeapon):
+    """A slow arcing crowd tool; two capsules and a gentle paper burst."""
+    weapon_id = "chalk_bomb"
+    label = "CHALK CAPSULE"
+    mag_size = 2
+    reload_time = 1.95
+    fire_delay = .78
+
+    def fire(self, system, ctx):
+        direction = system.aim_direction
+        origin = system.muzzle(17)
+        vx = direction.x*440
+        vy = min(-135,direction.y*390-235)
+        system.projectiles.append(PaperProjectile(
+            "chalk_bomb",origin.x,origin.y,vx,vy,0,9,1.7,0,
+            gravity=760,seed=system.next_seed()))
+        _call(ctx,"sounds","play","pencil")
+        return True
+
+
 class Excalibur(BaseWeapon):
     """Signature-page power reversal, intentionally not a campaign staple."""
 
@@ -785,6 +926,23 @@ class Excalibur(BaseWeapon):
         return True
 
 
+class MarginMaul(BaseWeapon):
+    """A deliberately slow pencil with a defensive, projectile-erasing swing."""
+    weapon_id = "margin_maul"
+    label = "OVERSIZED PENCIL"
+    fire_delay = 1.05
+
+    def fire(self, system, ctx):
+        system.combo_index = 3
+        system.combo_window = 0
+        system.melee = MeleeSwing(3, system.aim_direction, .96,
+                                  .32, .50, 2.4, 112, 375, .5,
+                                  style="pencil_maul", damage_kind="maul_finisher")
+        system.player.vx *= .32
+        _call(ctx, "sounds", "play", "pencil")
+        return True
+
+
 class WeaponSystem:
     """Page-aware arsenal with procedural projectiles, combo state, and saves.
 
@@ -802,7 +960,7 @@ class WeaponSystem:
     def __init__(self, player):
         self.player = player
         instances = (PencilBlade(), InkPistol(), MarkerShotgun(), EraserCannon(),
-                     RubberBand(), Excalibur())
+                     RubberBand(), Excalibur(), MarginMaul(), CarbonLance(), ReturningFold(), ChalkBomb())
         self.weapons = {weapon.weapon_id: weapon for weapon in instances}
         for weapon in self.weapons.values():
             weapon.system = self
@@ -1074,12 +1232,23 @@ class WeaponSystem:
                             self.weapons["pencil_blade"].cooldown, .055,
                         )
                     if applied:
+                        if swing.style == 'pencil_maul':
+                            _call(ctx, 'camera', 'kick', 6.2, .16)
+                            _call(ctx, 'game', 'request_hit_stop', .075)
                         self.impact(rect.centerx, rect.centery, kind,
                                     20 if swing.combo == 3 else 12)
             if self.melee.finished:
                 self.melee = None
+        if self.melee is not None and self.melee.style == "pencil_maul" and self.melee.active:
+            arc = self.melee.hit_rect(self.player)
+            for enemy in live:
+                for shot in getattr(enemy, "projectiles", ()):
+                    if shot.life > 0 and arc.colliderect(shot.rect):
+                        shot.life = 0
+                        _call(ctx, "particles", "eraser_dust", shot.x, shot.y, 5)
+                        _call(ctx, "sounds", "play", "erase")
         self.player.combat_swing = (self.melee.pencil_pose()
-            if self.melee is not None and self.current_id == "pencil_blade" else None)
+            if self.melee is not None and self.current_id in ("pencil_blade", "margin_maul") else None)
 
         world = getattr(ctx, "world", None)
         if world is None and getattr(ctx, "level", None) is not None:
@@ -1094,7 +1263,7 @@ class WeaponSystem:
 
     def damage_enemy(self, enemy, damage, direction, knockback, stagger, damage_kind, ctx,
                      attack_id=0, source_x=None):
-        if getattr(enemy, "dead", False):
+        if getattr(enemy, "dead", False) or getattr(enemy, "notebook_reveal", 1) < 1:
             return False
         boss_target = bool(getattr(enemy, "is_boss", False)
                            or getattr(enemy, "kind", "") == "boss")
@@ -1249,7 +1418,7 @@ class WeaponSystem:
             self.aim_target = None
         if direction.length_squared() < .0001:
             direction.update(getattr(self.player, "facing", 1) or 1, 0)
-        if self.current_id in ("pencil_blade", "excalibur"):
+        if self.current_id in ("pencil_blade", "excalibur", "margin_maul"):
             # Keep a mostly vertical mouse position from collapsing the sword's
             # horizontal hitbox or shoving the player in a surprising direction.
             facing = (1 if direction.x > .08 else -1 if direction.x < -.08

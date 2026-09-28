@@ -22,9 +22,14 @@ def verify(output):
             game._apply_page_identity()
             game.sounds.start_ambience(page)
             game.state="playing"
-            for _ in range(3):game.update(1/60,InputFrame())
+            for _ in range(10):
+                game.update(1/60,InputFrame())
+                game.draw()
+                game._present()
+                pygame.display.flip()
             game.draw()
             assert game.player.max_health==3
+            assert game.screen.get_at((WIDTH-20,100)).r > 100, "Paper canvas was covered"
             pages.append(game.level.title)
         game.save.write()
         game.save.load()

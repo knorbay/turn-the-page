@@ -1,18 +1,43 @@
-# TURN THE PAGE — Beta 0.9.0
+# TURN THE PAGE — 0.20.0 · Living Pages
+
+The five-page notebook now has three mandatory, physical route revisions:
+draw a bridge and erase its margin in Page I, jump to tear a Wanted poster's
+raised seam in Page II, and carry a fading star up the satellite ledges in
+Page III. The Artist comments on each solution. The established page themes,
+boss identities, save format and combat systems remain in place.
+
+Twenty-eight location-specific graphite landmarks make the pages more distinct.
+Melee weapons draw different live attack marks, and defeated figures linger as
+rubbed-out sketches before disappearing. Two new route achievements bring the
+total to 28. See [the 0.20 notes](BUYUK_GUNCELLEME_020_TR.md) for this release.
+
+## Previous update
+
+The page now changes visibly while you play. Each world has new, location-specific
+notebook sketches; ground lines are less repetitive; held tools have distinct
+shapes and firing or reload poses. Switching tools shows a brief larger drawing.
+The Artist reacts to pickups, injuries, revisions and the first solved puzzle,
+with optional replies. Page I has a physical three-mark drawing puzzle:
+trace a ledge, jump onto it, then erase the blocking margin. See
+[the 0.14 notes](CANLI_CIZIMLER_014_TR.md) for details.
+
+Pages IV and V each have a new mandatory room and a playable approach to their boss. Five new enemy drawings follow their page themes, a two-shot Chalk Capsule gives Pages II and III a short-range crowd tool, and a death visibly breaks the player's drawing before the Artist redraws it. The sound mixer limits overlapping effects. See [the 0.13 notes](GENISLETILMIS_SURUM_013.md) for the previous release.
 
 A hand-drawn notebook action game in which an Artist outside the page can redraw the player, lend tools, revise the arena, and react to how you fight.
 
-This build contains five playable pages, 23 required encounters, 20 ordinary enemy types, six named bosses, a separate three-attempt Baby-Face interlude, and four behavior-selected final configurations. The 97 authored enemy spawns include the bosses and interlude. Main-route length is 62,350 world units.
+This build contains five playable pages, 25 required encounters, 27 ordinary enemy types on the main route, six named bosses, a separate three-attempt Lost Expedition interlude, and four behavior-selected final configurations. The 105 authored enemy spawns include the bosses and interlude. Main-route length is 69,150 world units.
 
 TURN THE PAGE ties combat tools to each page: a katana for the Ronin, a Bowie knife, six-shooter and double barrel in the West, energy tools in orbit, and a field knife, suppressed pistol and breach shotgun for the Agent. Their reach, rhythm, recoil, reloads, grouping and projectile behavior differ. The inventory grows only as drawings are collected. The same silhouette appears in the pickup, the character's hands and the inventory.
 
-Twelve Lost Sketches now teach persistent, optional techniques. Twenty handwritten school notes and all in-game text are in English. The two-burst school bell, quiet classroom babble, distinct boss rules and Baby-Face reversal remain part of the game.
+Twelve Lost Sketches teach persistent, optional techniques. Thirty handwritten school notes and all in-game text are in English. The two-burst school bell, quiet classroom babble, distinct boss rules and Lost Expedition reversal remain part of the game.
 
 The latest combat pass adds three readable enemy variants: Gutter Lantern locks a falling ink column, Rake Cactus fires three ankle-height shots, and Ember Hound leaves a short-lived spark trail. Starting melee tools now have unique actions: katana launcher, same-target Bowie combo, piercing Ion Edge wave, wounded-target Field Knife execution, and a delayed redraw stroke.
 
-All six named bosses now escalate through distinct performances: returning compass arc, four-poster crossfire, express train return pass, expanding moon constellations and impact shards, scissors with real temporary floor cuts and marked X attacks, and the Final Editor's clean-margin redaction. Baby-Face keeps its signature sequence. Weapon sounds use page-specific cues, subtle variations and short mix ducking; enemy warnings and boss openings have dedicated cues.
+All six named bosses escalate through distinct performances: the Moon Ronin's blade arc, four-poster crossfire, an express train return pass, expanding orbital shields and impact shards, the Head of Redaction's temporary floor cuts and marked attacks, and the Rejected Hero's response to your fighting style. The Lost Expedition keeps its signature sequence. Weapon sounds use page-specific cues, subtle variations and short mix ducking; enemy warnings and boss openings have dedicated cues.
 
-The r8 pass adds planted running and clearer jump, landing, dash, and blade poses. Small marks on nearby enemies explain the Bowie's same-target chain and the Field Knife's wounded-target finish. Directional armour now reads a projectile's approach side, so a banked rear hit behaves correctly; blocked attacks no longer display successful cut marks. The title screen and native archive names identify the current revision.
+The previous animation pass added planted running and clearer jump, landing, dash, and blade poses. Small marks on nearby enemies explain the Bowie's same-target chain and the Field Knife's wounded-target finish. Directional armour now reads a projectile's approach side, so a banked rear hit behaves correctly; blocked attacks no longer display successful cut marks. The title screen and native archive names identify the current revision.
+
+Living Margins adds optional replies to the Artist, a harmless opening practice target, a shorter initial drawing, and pre-encounter retry landings throughout the campaign. Fold Duelists commit to two cuts, Margin Snipers freeze a visible sightline, and Split Lanterns draw two columns around a safe pocket. Fractional weapon damage is preserved; shotgun pellets no longer round up to one damage each. The Agent pistol and Redraw echoes have lower sustained damage. Named bosses require more openings, shorten later-phase recovery, and the Final Editor accepts one scratch per successful hit. There are 28 achievements across two pages.
 
 ## Run
 
@@ -46,6 +71,7 @@ Practice uses a temporary save. Ordinary play saves beside `main.py`; `PAPER_STO
 | Jump | Space; release for a shorter jump |
 | Attack | F, J or left click |
 | Dash | Shift, K or right click |
+| Drop through an elevated platform | S + Space / Down + jump |
 | Perfect return | Dash into an incoming shot at the last moment |
 | Reload | R |
 | Change weapon | Q or mouse wheel; acquired tools only |
@@ -61,13 +87,13 @@ Common controllers, resizable windows, mouse aiming, audio sliders, achievements
 
 | Page | Identity | Encounters / named bosses |
 | --- | --- | --- |
-| I — Ink of the Ronin | Katana, washi, bamboo, folded shrine | 4 / Moon Compass |
+| I — Ink of the Ronin | Katana, washi, bamboo, folded shrine | 4 / Moon Ronin |
 | II — Dust & Bad Decisions | Bowie knife, six-shooter, double barrel, ledger desert | 4 / Wanted Sketch, Railroad Stapler |
-| III — A Very Wrong Future | Ion Edge, Orbit Pulse, Null Cannon, orbital chart | 5 / Orbital Mistake; Baby-Face is an interlude |
-| IV — The Carbon Agent | Field knife, suppressed pistol, breach shotgun, carbon city | 5 / Head of Redaction |
-| V — The Last Draft | Redraw Pencil, mixed enemy roles, revised platforms, schoolwork | 5 / Final Editor |
+| III — A Very Wrong Future | Ion Edge, Orbit Pulse, Null Cannon, Meteor Chalk, orbital chart | 5 / Orbital Sentinel; Lost Expedition is an interlude |
+| IV — The Carbon Agent | Field knife, suppressed pistol, breach shotgun, carbon city | 6 / Head of Redaction |
+| V — The Last Draft | Redraw Pencil, mixed enemy roles, revised platforms, schoolwork | 6 / Rejected Hero |
 
-Baby-Face remains a staged comedy reversal: two authored one-hit defeats, the moustache and “It's more fair now.”, then a locked sword-drawing/pulling sequence and your winning strike. The real finale is on Page V.
+The Lost Expedition remains a staged reversal: two authored one-hit defeats, an attempted pressure-seal repair, then a sword-drawing/pulling sequence and your winning strike. The real finale is on Page V.
 
 The final encounter uses four attack scripts and different physical platform layouts: THE AGGRO MAN, BRAVEMAN, MIRROR and MIXED REVISION. Its selection considers recorded attacks, damage, actual retreat, time spent close to enemies, and boss clear times. The choice is remembered across retries.
 
@@ -90,7 +116,7 @@ python3 -m unittest discover -s tests -q
 python3 tools/render_beta_review.py
 ```
 
-160 tests pass, including an informed new-game-to-ending pilot through all five pages with only the two scripted Baby-Face defeats. This is automated progression verification; human completion time and first-play difficulty require playtesting.
+Automated tests cover an informed new-game-to-ending pilot through all five pages, including the two scripted Lost Expedition defeats. This is automated progression verification; human completion time and first-play difficulty require playtesting.
 
 Additional checks cover physical platforms, checkpoints, projectile returns, actual stagger, all four final layouts, save migration, shootable decoys, train rear vulnerability, orbital armour and protected audio channels. The Final Editor now locks and draws its aim before firing and converts leftover projectiles to harmless graphite when its clip opens. All six direct boss practice entries were opened and rendered using the runtime.
 

@@ -86,6 +86,18 @@ class SchoolAudioTests(unittest.TestCase):
             self.assertEqual(sounds.bell_channel.get_volume(), 0)
         pygame.mixer.stop()
 
+    def test_simultaneous_hits_have_a_bounded_effect_voice_pool(self):
+        sounds = NotebookSounds()
+        with patch("pygame.time.get_ticks", side_effect=range(1000, 2000, 11)):
+            for cue in ("hit", "heavy_hit", "enemy_break", "paper_break",
+                        "pencil", "blade", "ink", "staple", "snip"):
+                sounds.play(cue, cooldown_ms=0)
+        self.assertLessEqual(sum(channel.get_busy() for channel in sounds.effect_channels), 6)
+        self.assertEqual(len(sounds.effect_channels), 6)
+        self.assertLessEqual(max(channel.get_volume() for channel in sounds.effect_channels),
+                             sounds.master_volume * sounds.sfx_volume)
+        pygame.mixer.stop()
+
     def test_new_material_cues_are_audibly_different_and_preserve_hero_bank(self):
         composer = NotebookComposer(22050)
         cues = [composer.sfx(name) for name in

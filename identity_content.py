@@ -23,28 +23,30 @@ REQUIRED_SLICE_ENCOUNTERS = {
     1: ("pistol_margin_drill", "coffee_crossfire", "marker_margin_trial", "midnight_train"),
     2: ("safe_pocket_counterattack", "orbital_debris", "zero_garden", "eraser_calibration",
         "baby_face_interlude"),
-    3: ("agent_checkpoint", "carbon_crossfire", "redacted_rooftops", "office_ambush", "scissor_office"),
-    4: ("last_lesson", "erased_answers", "margin_revolt", "the_last_crossout", "final_margin_revision"),
+    3: ("agent_checkpoint", "carbon_crossfire", "redacted_rooftops", "office_ambush",
+        "evidence_vault", "scissor_office"),
+    4: ("last_lesson", "erased_answers", "margin_revolt", "the_last_crossout",
+        "unfinished_corridor", "final_margin_revision"),
 }
 
 # Every page clears the requested 10k floor and then grows at a different rate.
-PAGE_ROUTE_ENDS = {0: 10950.0, 1: 13050.0, 2: 16750.0, 3: 10800.0, 4: 10800.0}
+PAGE_ROUTE_ENDS = {0: 10950.0, 1: 13050.0, 2: 16750.0, 3: 14200.0, 4: 14200.0}
 
 BOSS_ENCOUNTERS = {
-    "moon_gate_duel": ("moon_compass", "THE MOON COMPASS"),
+    "moon_gate_duel": ("moon_compass", "THE MOON RONIN"),
     "marker_margin_trial": ("wanted_sketch", "WANTED: FAILED ALIVE"),
-    "midnight_train": ("railroad_stapler", "THE LAST STAPLER WEST"),
-    "zero_garden": ("orbital_mistake", "ORBITAL ARTIST ERROR"),
+    "midnight_train": ("railroad_stapler", "THE MIDNIGHT EXPRESS"),
+    "zero_garden": ("orbital_mistake", "ORBITAL SENTINEL"),
     "scissor_office": ("scissor_director", "THE HEAD OF REDACTION"),
-    "final_margin_revision": ("final_editor", "THE FINAL EDITOR"),
+    "final_margin_revision": ("final_editor", "THE REJECTED HERO"),
 }
 
 BOSS_RULES = {
-    "moon_gate_duel": "JUMP THE ARC — STRIKE THE PINNED HINGE",
+    "moon_gate_duel": "JUMP THE ARC — STRIKE THE STUCK BLADE",
     "marker_margin_trial": "THE WET INK IS REAL — SHOOT BEFORE THE DRAW",
     "midnight_train": "JUMP THE RAIL — HIT THE REAR OR THE OPEN ENGINE",
-    "zero_garden": "LET THE MOONS GO — HIT THE EXPOSED PLANET",
-    "final_margin_revision": "READ THE PROOF — ATTACK WHEN THE CLIP OPENS",
+    "zero_garden": "LET THE SHIELDS GO — HIT THE EXPOSED CORE",
+    "final_margin_revision": "READ THE DRAFT — ATTACK WHEN ITS GUARD DROPS",
 }
 
 CURATED_SPECS = {
@@ -61,7 +63,7 @@ CURATED_SPECS = {
         {"wave": 1, "kind": "lantern_yokai", "offset": 760},
     ],
     "bamboo_static": [
-        {"wave": 0, "kind": "ink_samurai", "offset": 330},
+        {"wave": 0, "kind": "fold_duelist", "offset": 330},
         # The narrow veteran freezes a violet rain column. Pair it only with
         # one melee threat so MOVE reads differently from the base fan.
         {"wave": 0, "kind": "gutter_lantern", "offset": 760},
@@ -78,11 +80,11 @@ CURATED_SPECS = {
         {"wave": 0, "kind": "ink_outlaw", "offset": 220},
         {"wave": 0, "kind": "tumbleweed_thing", "offset": 440},
         {"wave": 1, "kind": "cactus_gunner", "offset": 190},
-        {"wave": 1, "kind": "paper_wasp", "offset": 450},
+        {"wave": 1, "kind": "ticket_vulture", "offset": 450},
     ],
     "coffee_crossfire": [
         {"wave": 0, "kind": "ink_outlaw", "offset": 230},
-        {"wave": 0, "kind": "paper_wasp", "offset": 690},
+        {"wave": 0, "kind": "ticket_vulture", "offset": 690},
         {"wave": 1, "kind": "tumbleweed_thing", "offset": 260},
         {"wave": 1, "kind": "rake_cactus", "offset": 520},
         {"wave": 1, "kind": "goblin_scribble", "offset": 810},
@@ -105,16 +107,16 @@ CURATED_SPECS = {
         {"wave": 1, "kind": "ink_clone", "offset": 625},
     ],
     "orbital_debris": [
-        {"wave": 0, "kind": "origami_drone", "offset": 260},
+        {"wave": 0, "kind": "satellite_sentry", "offset": 260},
         {"wave": 0, "kind": "star_scout", "offset": 750},
         {"wave": 1, "kind": "ember_hound", "offset": 240},
         {"wave": 1, "kind": "moon_bot", "offset": 555},
-        {"wave": 1, "kind": "doodle_turret", "offset": 870},
+        {"wave": 1, "kind": "satellite_sentry", "offset": 870},
     ],
     "zero_garden": [
         {"wave": 0, "kind": "star_scout", "offset": 250},
         {"wave": 0, "kind": "comet_hound", "offset": 575},
-        {"wave": 0, "kind": "goblin_scribble", "offset": 900},
+        {"wave": 0, "kind": "satellite_sentry", "offset": 900},
         {"wave": 1, "kind": "orbital_mistake", "offset": 625},
     ],
     "eraser_calibration": [
@@ -198,7 +200,7 @@ class BabyFaceSignatureBeat:
             ctx.director.tool = ArtistTool("pencil", moustache_x, moustache_y,
                                             True, -.52, 1.2)
             ctx.director.write(boss.x - 170, boss.ground_y - 345,
-                               "It's more fair now.", progress)
+                               "Pressure seal fixed. That should help.", progress)
             if progress >= 1:
                 self.state = "second_attempt"
                 self.timer = 0
@@ -304,7 +306,7 @@ def _add_page_costume_event(runtime):
         return
     style = ("ronin", "cowboy", "astronaut")[runtime.index]
     label = ("wrong century", "needs a hat", "close enough to space")[runtime.index]
-    trigger_x = 1120 if runtime.index == 0 else runtime.spawn[0]
+    trigger_x = 340 if runtime.index == 0 else runtime.spawn[0]
 
     def update(ctx, progress):
         ctx.player.page_style = style if progress > .22 else "plain"
@@ -538,7 +540,7 @@ def _add_curated_page_end(runtime):
         world.notes.extend([
             PaperNote(8950, 250, "ORBIT DECAYS HERE", "small", (82, 105, 123), -2, True),
             PaperNote(10400, 225, "zero gravity*  (*mostly)", "large", INK_LIGHT, 1, False),
-            PaperNote(13650, 230, "UNIDENTIFIED LARGE BABY", "large", RED_RULE, -1, True),
+            PaperNote(13650, 230, "OVERSIZED EXPEDITION SUIT", "large", RED_RULE, -1, True),
             PaperNote(16590, 230, "CLASSIFIED / turn over", "large", INK, -2, False),
         ])
 
@@ -554,7 +556,7 @@ def _add_page_three_climax(runtime):
         {"wave": 0, "kind": "baby_face_giant", "offset": 655},
     ], 0, False)
     baby.mandatory = True
-    baby.display_name = "A VERY LARGE ACCIDENT"
+    baby.display_name = "THE LOST EXPEDITION"
     baby.boss_rule = "THREE ATTEMPTS — THE ARTIST CHEATS LAST"
     runtime.entities.add(baby)
     runtime.entities.add(ArenaPaperBeat(runtime.world, baby, "draw_cover", 0, 590))

@@ -25,6 +25,7 @@ LEGACY_ENEMY_TYPES = {"crawler", "hopper", "spitter", "boss"}
 # These are lanes the player answers, not difficulty tiers. Two attackers may
 # overlap only when their warnings ask for different, compatible responses.
 ENCOUNTER_ROLES = {
+    'fold_duelist': 'close', 'margin_sniper': 'ranged', 'split_lantern': 'air',
     "crawler": "close", "ruler_guard": "close", "ink_samurai": "close",
     "ink_clone": "close", "crumpled_one": "close",
     "tumbleweed_thing": "close", "comet_hound": "close",
@@ -237,7 +238,9 @@ class DoodleEnemy:
             return False
         if "eraser" in tags and self.armor > 0:
             self.armor = max(0, self.armor - 1)
-        damage = max(1, int(round(amount)))
+        damage = max(0.0, float(amount))
+        if damage <= 0:
+            return False
         self.hp -= damage
         self.hit_flash = .15
         direction = 1 if self.x >= source_x else -1
@@ -568,6 +571,12 @@ class CombatArena:
         enemy_bounds = (self.start_x - 45, self.end_x - 35)
         self._coordinate_pressure(ctx, dt)
         for enemy in self.enemies:
+            if getattr(enemy, "notebook_reveal", 1) < 1:
+                enemy.notebook_reveal = min(1, enemy.notebook_reveal+dt/.7)
+                continue
+            if getattr(enemy, "artist_still", 0) > 0:
+                enemy.artist_still = max(0, enemy.artist_still-dt)
+                continue
             enemy.update(dt, ctx, enemy_bounds)
         self._frame_active_fight(ctx)
         self._update_audio_pressure(ctx)
@@ -659,6 +668,7 @@ class CombatArena:
                         kind, x, ground_y, seed=seed,
                         boss=self.boss or normalized_kind == "boss",
                     )
+                enemy.notebook_reveal = 0.0
                 self.enemies.append(enemy)
                 if getattr(enemy, "is_boss", False):
                     self.boss_kind = getattr(enemy, "kind", normalized_kind)
@@ -876,5 +886,14 @@ class CombatArena:
                 surface.blit(card, ((WIDTH - card.get_width()) // 2, 76))
         from staging import draw_enemy_read
         for enemy in self.enemies:
-            enemy.draw(surface, camera, renderer)
-            draw_enemy_read(surface, camera, renderer, enemy)
+            from notebook_art import redraw_doodle
+            old_clip = surface.get_clip()
+            reveal = getattr(enemy, 'notebook_reveal', 1)
+            if reveal < 1:
+                top = round(enemy.rect.top+camera.offset_y-90)
+                surface.set_clip(old_clip.clip(pygame.Rect(camera.screen_x(enemy.x)-180,top,360,
+                                        round((enemy.rect.height+180)*reveal))))
+            if not redraw_doodle(enemy, surface, camera, renderer):
+                enemy.draw(surface, camera, renderer)
+            surface.set_clip(old_clip)
+            if reveal >= 1: draw_enemy_read(surface, camera, renderer, enemy)
