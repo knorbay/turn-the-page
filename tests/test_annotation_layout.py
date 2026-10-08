@@ -33,7 +33,12 @@ class AnnotationLayoutContracts(unittest.TestCase):
             def track(notes, surface, text, x, y, font, color, seed, **kwargs):
                 end = original(notes, surface, text, x, y, font, color, seed, **kwargs)
                 if y in (1, 42, 75, 125):
-                    endpoints.append((text, y, end))
+                    # The returned pen position includes a final blank space.
+                    # Measure actual ink on a wider sheet so clipping cannot
+                    # hide an overflow, regardless of the installed font.
+                    probe = pygame.Surface((2048, 165), pygame.SRCALPHA)
+                    original(notes, probe, text, x, y, font, color, seed, **kwargs)
+                    endpoints.append((text, y, probe.get_bounding_rect().right))
                 return end
 
             with self.subTest(language=language), patch.object(NotebookAnnotations, "_hand", track):

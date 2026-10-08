@@ -41,6 +41,9 @@ from brand_art import hero_sprite, artist_sprite
 DEFAULT_OUTPUT=ROOT.parents[1]/"outputs"/"itch-0.42"
 FPS=12
 GIF_SIZE=(800,500)
+# itch.io's image gallery limits each upload to 3 MB. Leave room for
+# decimal/binary accounting and future captures with a little more motion.
+MAX_GIF_BYTES=2_850_000
 
 
 def pil(surface):
@@ -203,16 +206,23 @@ def encode_gif(frames,path):
         frame=frames[round(i*(len(frames)-1)/23)]
         sample.paste(frame.resize((200,125),Image.Resampling.BILINEAR),((i%6)*200,(i//6)*125))
     duration=[round((i+1)*100/FPS)*10-round(i*100/FPS)*10 for i in range(len(frames))]
-    for width,colors in ((800,128),(768,128),(720,128),(720,96),(640,96)):
-        palette=sample.quantize(colors=colors,method=Image.Quantize.MEDIANCUT)
+    for width,colors in ((640,96),(600,96),(560,96),(560,64),(512,64)):
+        palette=sample.quantize(colors=colors-8,method=Image.Quantize.MEDIANCUT)
+        # Small contact-sheet samples underrepresent thin black strokes and
+        # warning reds. Reserve these actual notebook colors so GIF size
+        # reduction keeps the drawing readable rather than washing it out.
+        ink_colors=((32,33,32),(69,68,63),(106,104,96),(165,45,39),
+                    (201,78,70),(65,106,127),(186,139,62),(239,236,219))
+        values=palette.getpalette()[:(colors-8)*3]+[v for color in ink_colors for v in color]
+        palette.putpalette(values+[0]*(768-len(values)))
         indexed=[frame.resize((width,round(width*HEIGHT/WIDTH)),Image.Resampling.LANCZOS)
                  .quantize(palette=palette,dither=Image.Dither.NONE) for frame in frames]
         buffer=io.BytesIO()
         indexed[0].save(buffer,format="GIF",save_all=True,append_images=indexed[1:],
                         duration=duration,loop=0,disposal=2,optimize=True)
         data=buffer.getvalue()
-        if len(data)<=6_000_000:break
-    if len(data)>6_000_000:raise RuntimeError("GIF exceeds the store's 6 MB target")
+        if len(data)<=MAX_GIF_BYTES:break
+    if len(data)>MAX_GIF_BYTES:raise RuntimeError("GIF exceeds the store's 3 MB upload limit")
     path.write_bytes(data)
     with Image.open(path) as check:
         milliseconds=0
@@ -284,7 +294,8 @@ def main(out):
     screen=pygame.display.set_mode((WIDTH,HEIGHT))
     manifest={"version":VERSION,"language":"en","screenshot_source":"shipping Game.draw",
               "save_policy":"all saves isolated in an automatically removed temporary directory",
-              "screenshots":[],"gifs":[],"cover_source":"existing code-authored hero and Artist; runtime notebook paper"}
+              "screenshots":[],"gifs":[],"cover_source":"existing code-authored hero and Artist; runtime notebook paper",
+              "gif_upload_limit_bytes":3_000_000,"gif_encoding_target_bytes":MAX_GIF_BYTES}
     screenshots=[];gif_samples=[];gif_labels=[]
     with tempfile.TemporaryDirectory(prefix="turn-store-042-") as folder:
         temp=Path(folder)
