@@ -106,6 +106,50 @@ class ArtistDialogueTests(unittest.TestCase):
         self.assertEqual(self.game.behavior.count('artist_reply'), 0)
         self.assertEqual(self.artist.timer, 0)
 
+    def test_input_during_artist_stroke_cannot_reply_to_hidden_note(self):
+        self.artist.say('manual','Are you there?','Here.')
+        director=SimpleNamespace(canvas_owner=object(),
+            tool=SimpleNamespace(visible=False),blocks_combat=False)
+        self.game.level.director=director
+        for _ in range(5):self.tick(interact=True)
+        self.assertEqual(self.game.behavior.count('artist_reply'),0)
+        self.assertEqual(self.artist.text,'Are you there?')
+        self.assertEqual(self.saved,[])
+        director.canvas_owner=None
+        director.tool.visible=True
+        self.tick(interact=True)
+        director.tool.visible=False
+        director.blocks_combat=True
+        self.tick(interact=True)
+        self.assertEqual(self.game.behavior.count('artist_reply'),0)
+        director.blocks_combat=False
+        self.tick(interact=True)
+        self.assertEqual(self.artist.text,'Here.')
+        self.assertEqual(self.game.behavior.count('artist_reply'),1)
+
+    def test_new_note_waits_until_the_local_artist_releases_the_canvas(self):
+        director=SimpleNamespace(canvas_owner=object())
+        self.game.level.director=director
+        self.game.weapons.unlocked.add('chalk_bomb')
+        self.game.weapons.current_id='chalk_bomb'
+        self.tick()
+        self.assertEqual(self.artist.text,'')
+        self.assertEqual(len(self.artist.pending),1)
+        director.canvas_owner=None
+        self.tick()
+        self.assertIn('chalk over cover',self.artist.text)
+        self.assertEqual(self.artist.pending,[])
+
+    def test_completed_puzzle_does_not_silence_its_artist_exchange(self):
+        self.game.level.entities.items.append(SimpleNamespace(
+            puzzle_id='first_page_draft',encounter_active=True,completed=True))
+        self.game.level.flags.add('first_page_draft')
+        self.tick()
+        self.assertIn('step where my first line failed',self.artist.text)
+        self.tick(interact=True)
+        self.assertIn('next answer',self.artist.text)
+        self.assertEqual(self.game.behavior.count('artist_reply'),1)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -155,10 +155,17 @@ class BabyFaceSignatureBeat:
 
     def update(self, dt, ctx, interact=False):
         del interact
-        if not self.arena.encounter_active:
+        from action_content import claim_artist_canvas,release_artist_canvas
+        if not self.arena.encounter_active or ctx.player.health<=0:
+            release_artist_canvas(ctx,self)
+            ctx.player.release_lock("baby_face_revision")
+            if self.state in ("sword_draw","sword_pull"):
+                ctx.camera.script_target=None
             return
         boss = self._boss()
         if boss is None:
+            release_artist_canvas(ctx,self)
+            ctx.player.release_lock("baby_face_revision")
             return
         weapons = getattr(ctx, "weapons", None)
         deaths = (ctx.game.behavior.deaths_to("baby_face_giant")
@@ -171,6 +178,8 @@ class BabyFaceSignatureBeat:
             boss.artist_paused = False
             self.state = "ready"
             self.completed = True
+            release_artist_canvas(ctx,self)
+            ctx.player.release_lock("baby_face_revision")
             return
         if self.state == "waiting":
             if deaths == 0:
@@ -178,12 +187,14 @@ class BabyFaceSignatureBeat:
                 if self.timer >= 2.6:
                     boss.trigger_unfair_slap()
             elif deaths == 1:
+                if not claim_artist_canvas(ctx,self,allow_in_combat=True):return
                 self.state = "moustache"
                 self.timer = 0
                 boss.artist_paused = True
                 ctx.player.acquire_lock("baby_face_revision")
                 ctx.sounds.play("pencil")
             elif deaths >= 2:
+                if not claim_artist_canvas(ctx,self,allow_in_combat=True):return
                 self.state = "sword_draw"
                 self.timer = 0
                 boss.moustache_progress = 1
@@ -191,6 +202,8 @@ class BabyFaceSignatureBeat:
                 ctx.player.acquire_lock("baby_face_revision")
                 ctx.camera.script_target = (ctx.player.center_x + boss.x) * .5
                 ctx.sounds.play("hero_reveal")
+        if self.state in ("moustache","sword_draw","sword_pull"):
+            if not claim_artist_canvas(ctx,self,allow_in_combat=True):return
         if self.state == "moustache":
             self.timer += dt
             progress = min(1.0, self.timer / 1.05)
@@ -206,6 +219,7 @@ class BabyFaceSignatureBeat:
                 self.timer = 0
                 boss.artist_paused = False
                 ctx.player.release_lock("baby_face_revision")
+                release_artist_canvas(ctx,self)
                 ctx.level.toast = "attempt two — still completely unfair"
                 ctx.level.toast_time = 3.2
         elif self.state == "second_attempt":
@@ -246,6 +260,7 @@ class BabyFaceSignatureBeat:
                 ctx.sounds.play("hero_sword")
                 self.state = "ready"
                 self.completed = True
+                release_artist_canvas(ctx,self)
                 if getattr(ctx, "game", None) is not None:
                     ctx.game.behavior.record("artist_help", kind="excalibur",
                                              page=ctx.level.chapter_index)
@@ -539,7 +554,7 @@ def _add_curated_page_end(runtime):
             platform.appearance = style
         world.notes.extend([
             PaperNote(8950, 250, "ORBIT DECAYS HERE", "small", (82, 105, 123), -2, True),
-            PaperNote(10400, 225, "zero gravity*  (*mostly)", "large", INK_LIGHT, 1, False),
+            PaperNote(10140, 190, "zero gravity*  (*mostly)", "large", INK_LIGHT, 1, False),
             PaperNote(13650, 230, "OVERSIZED EXPEDITION SUIT", "large", RED_RULE, -1, True),
             PaperNote(16590, 230, "CLASSIFIED / turn over", "large", INK, -2, False),
         ])
@@ -552,7 +567,7 @@ def _add_page_three_climax(runtime):
     from action_content import ArenaPaperBeat
     Checkpoint = type(runtime.checkpoints[0])
 
-    baby = CombatArena(runtime.world, 15590, 16530, "baby_face_interlude", [
+    baby = CombatArena(runtime.world, 15420, 16530, "baby_face_interlude", [
         {"wave": 0, "kind": "baby_face_giant", "offset": 655},
     ], 0, False)
     baby.mandatory = True
@@ -653,7 +668,7 @@ def apply_identity_pass(runtime, authored_end_x):
         runtime.end_x - 310, 265,
         ("turn it over — the dust is getting closer" if runtime.index == 0 else
          "turn it over — the stars are badly drawn" if runtime.index == 1 else
-         "there is no next coordinate"),
+         "turn it over — the next page is classified"),
         "small", INK_LIGHT, -1, False,
     ))
     runtime.world.width = runtime.end_x + 220

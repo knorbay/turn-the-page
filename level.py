@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from types import SimpleNamespace
 import pygame
 
 from chapters import Checkpoint, build_chapter
@@ -54,10 +55,31 @@ class Level:
     def subtitle(self):
         return self.runtime.subtitle
 
-    def load_chapter(self, index, checkpoint_id="start", player=None, camera=None):
+    def load_chapter(self, index, checkpoint_id="start", player=None, camera=None,
+                     preserve_respawn=False):
+        if hasattr(self, "runtime"):
+            self.runtime.director.tool.visible = False
+            for event in self.runtime.director.events:
+                event.active = False
+            # Old actor references must not leave temporary cut-outs on a
+            # surviving world during explicit page loads or direct practice.
+            for entity in self.runtime.entities.items:
+                if getattr(entity, "is_optional_guardian", False):
+                    entity.abort(SimpleNamespace(director=self.runtime.director))
+                for enemy in getattr(entity, "enemies", ()):
+                    restore = getattr(enemy, "_restore_temporary_erases", None)
+                    if callable(restore):
+                        restore(force=True)
+        if not preserve_respawn:
+            self.respawn_timer = 0.0
+            self.respawn_committed = False
+            self.respawn_sound_played = False
         self.chapter_index = max(0, min(4, int(index)))
         secrets = self.save_system.data["secrets"] if self.save_system else []
         self.runtime = build_chapter(self.chapter_index, secrets)
+        for entity in self.runtime.entities.items:
+            if getattr(entity, "is_optional_guardian", False):
+                entity.restore_saved_completion(self.save_system)
         self.flags = set(getattr(self.runtime, "initial_flags", ()))
         self.interaction_hint = ""
         self.toast = ""
@@ -67,6 +89,8 @@ class Level:
         self.completion_recorded = False
         valid_ids = {cp.checkpoint_id for cp in self.runtime.checkpoints}
         self.current_checkpoint = checkpoint_id if checkpoint_id in valid_ids else "start"
+        from tutorial import attach_training
+        attach_training(self.runtime, self.save_system, self.current_checkpoint)
         self._apply_checkpoint_snapshot(self.current_checkpoint)
         cp = self.checkpoint_spec(self.current_checkpoint)
         if player is not None:
@@ -88,19 +112,36 @@ class Level:
             player.health_restore_flash = 0.0
             player.hurt_flash = 0.0
             player.invulnerable = 0
+            player.death_progress = 0
+            player.attack_timer = player.attack_cooldown = 0
+            player.dash_timer = player.dash_cooldown = 0
+            player.combat_swing = None
+            player.jump_buffer = player.coyote = 0
+            player.look_target = None
             apply_sketch_rewards(player, secrets)
         if camera is not None:
-            camera.x = camera.target_x = max(0, cp.x - 360)
+            focus_x = cp.x + (player.WIDTH/2 if player is not None else 12)
+            camera.x = camera.target_x = max(0, min(self.world.width-camera.screen_width,
+                                                     focus_x-camera.screen_width*.5))
+            camera.look_ahead = 0.0
             camera.script_target = None
             camera.vertical_offset = 0
+            camera.shake_time = camera.shake_strength = 0
+            camera.offset_x = camera.offset_y = 0
         self.world.active_layer = cp.layer
         weapons = getattr(self, "weapons", None)
         if weapons is not None:
-            weapons.projectiles.clear()
-            weapons.impacts.clear()
-            weapons.melee = None
+            weapons.reset_scene()
         self.page_title_time = 4.2
+        if player is not None:
+            self.refresh_drawings(player)
         return cp
+
+    def refresh_drawings(self, player):
+        actors = [player]
+        for entity in self.entities.items:
+            actors.extend(getattr(entity, "enemies", ()))
+        self.world.refresh_drawings(actors)
 
     def checkpoint_spec(self, checkpoint_id=None):
         checkpoint_id = checkpoint_id or self.current_checkpoint
@@ -128,10 +169,12 @@ class Level:
             game.persist_behavior(write=False)
 
     def discover_secret(self, secret_id, caption):
+        first = not self.save_system or not self.save_system.data.get("secrets")
         is_new = self.save_system.discover(secret_id) if self.save_system else True
         if is_new:
-            self.toast = collection_message(secret_id)
-            self.toast_time = 5.5
+            self.toast = ("Lost Sketches are discarded ideas. Keep them to learn lasting tricks across pages."
+                          + " " + collection_message(secret_id) if first else collection_message(secret_id))
+            self.toast_time = 7.0 if first else 4.5
             game = getattr(self, "game", None)
             if game is not None:
                 apply_sketch_rewards(game.player, self.save_system.data.get("secrets", [])
@@ -156,13 +199,16 @@ class Level:
             return
 
         ctx = self.context(player, camera, particles, sounds)
+        self.refresh_drawings(player)
         self.director.update(dt, ctx)
         for event in self.runtime.live_events:
             event.update(dt, ctx)
+        self.refresh_drawings(player)
         for entity in self.entities.items:
             layer = getattr(entity, "layer", self.world.active_layer)
             if layer == self.world.active_layer and getattr(entity, "active", True):
                 entity.update(dt, ctx, interact)
+                self.refresh_drawings(player)
 
         if self.director.tool.visible:
             player.look_target = (self.director.tool.x, self.director.tool.y)
@@ -188,7 +234,10 @@ class Level:
             self.begin_respawn(player, cause, particles, sounds)
         mandatory_ready = all(getattr(entity, "completed", False)
                               for entity in self.entities.items if getattr(entity, "mandatory", False))
-        if player.x >= self.runtime.end_x and player.on_ground and mandatory_ready:
+        # The page edge is crossed in the air as well as on foot. Waiting for
+        # a landing lets a final jump overshoot the short exit deck and fall.
+        if (player.x >= self.runtime.end_x and mandatory_ready
+                and player.health > 0 and self.respawn_timer <= 0):
             self.chapter_complete = True
 
     def _checkpoint_after(self, candidate: Checkpoint, current_id):
@@ -218,10 +267,18 @@ class Level:
         self.respawn_committed = False
         self.respawn_sound_played = False
         self.respawn_origin = (player.center_x, player.rect.centery)
+        for entity in self.entities.items:
+            if getattr(entity, "is_optional_guardian", False):
+                entity.abort(SimpleNamespace(director=self.director))
         player.death_progress = .001
         player.draw_amount = 1
         game = getattr(self, "game", None)
         if game is not None:
+            policy = getattr(game, 'artist_director', None)
+            failed_room = next((e for e in self.entities.items
+                if getattr(e, 'arena_id', None) == self.respawn_arena), None)
+            if policy is not None:
+                policy.observe_death(failed_room, self.context(player, self.game.camera, particles, sounds), self.respawn_cause)
             game.behavior.record("death", cause=self.respawn_cause,
                                  arena=self.respawn_arena,
                                  weapon=getattr(getattr(self, "weapons", None), "current_id", ""),
@@ -245,6 +302,10 @@ class Level:
             if callable(combat_audio):
                 combat_audio(False)
         player.acquire_lock("respawn")
+        self.director.tool.visible = False
+        weapons = getattr(self, "weapons", None)
+        if weapons is not None:
+            weapons.reset_scene()
 
     def _update_respawn(self, dt, player, camera, particles=None, sounds=None):
         self.director.tool.visible = False
@@ -264,7 +325,8 @@ class Level:
             player.draw_amount = 0
         elif not self.respawn_committed:
             self.respawn_committed = True
-            self.load_chapter(self.chapter_index, self.current_checkpoint, player, camera)
+            self.load_chapter(self.chapter_index, self.current_checkpoint, player, camera,
+                              preserve_respawn=True)
             player.acquire_lock("respawn")
             player.death_progress = 0
             player.redraw_alpha = 0
@@ -330,6 +392,7 @@ class Level:
     def _apply_checkpoint_snapshot(self, checkpoint_id):
         cp = self.checkpoint_spec(checkpoint_id)
         spawn_x = cp.x
+        authored_x = self.runtime.pacing_map.inverse(cp.x) if hasattr(self.runtime, "pacing_map") else cp.x
         # A checkpoint is a stable snapshot, so its own prerequisites are
         # already true when loading it from disk or after a redraw.
         self.flags.update(cp.requires)
@@ -337,17 +400,34 @@ class Level:
             if checkpoint_id != "start":
                 self.flags.add("player_drawn")
                 self._finish_director("player_drawn")
-            if spawn_x >= 2860:
-                for name in ("first_step", "second_step", "third_step", "first_bridge"):
-                    p = self.world.platform_named(name)
-                    if p: p.draw_progress = 1
-                for event in self.director.events:
-                    event.done = True
+            if authored_x >= 1010:
+                self._finish_director("movement_note")
+                self._finish_director("jump_note")
+            for threshold, platform_name, event_name in (
+                    (1010, "first_step", "first_step_drawn"),
+                    (1250, "second_step", "second_step_drawn"),
+                    (1500, "third_step", "third_step_drawn"),
+                    (2780, "first_bridge", "first_bridge_drawn")):
+                if authored_x >= threshold:
+                    platform = self.world.platform_named(platform_name)
+                    if platform is not None:
+                        platform.complete_drawing()
+                    self._finish_director(event_name)
+            if authored_x >= 1250:
+                self._finish_director("first_tool_drawn")
+                for entity in self.entities.items:
+                    if (getattr(entity, "weapon_id", "") == "folded_shuriken"
+                            and getattr(entity, "authored_by_director", False)):
+                        entity.draw_progress = 1
+                        entity.drawing = True
         elif self.chapter_index == 1:
-            if spawn_x >= 2110:
-                for name in ("ruled_line_1", "ruled_line_2", "ruled_line_3"):
-                    self.world.platform_named(name).draw_progress = 1
-            if spawn_x >= 6660:
+            if authored_x >= 2110:
+                for platform_name, event_name in (("ruled_line_1", "ruled_one"),
+                                                 ("ruled_line_2", "ruled_two"),
+                                                 ("ruled_line_3", "ruled_three")):
+                    self.world.platform_named(platform_name).complete_drawing()
+                    self._finish_director(event_name)
+            if authored_x >= 6660:
                 self.world.platform_named("margin_bridge").draw_progress = 1
                 for event in self.director.events:
                     event.done = True
@@ -360,18 +440,18 @@ class Level:
                         platform.draw_progress = 1
                         platform.erased[:] = []
             else:
-                if spawn_x >= 2460:
+                if authored_x >= 2460:
                     self.world.platform_named("wrong_support").erase(1320, 1780)
                     for i in range(3):
                         self.world.platform_named(f"fixed_step_{i}").draw_progress = 1
                     self.flags.update(("support_erased", "weight_landed", "bad_draft_fixed"))
-                if spawn_x >= 4250:
+                if authored_x >= 4250:
                     self.world.platform_named("correction_bridge").erase(2920, 4050)
                     self.flags.add("bridge_correction")
                     for event in self.runtime.live_events:
                         if getattr(event, "name", "") == "bridge_correction":
                             event.done = True
-                if spawn_x >= 6350:
+                if authored_x >= 6350:
                     self.world.platform_named("circuit_gate").draw_progress = 1
                     self.flags.add("circuit_complete")
                     for event in self.director.events:
@@ -385,10 +465,10 @@ class Level:
                 for event in self.director.events:
                     event.done = True
         elif self.chapter_index == 4 and self.runtime.page_style != "last_draft":
-            if spawn_x >= 2150:
+            if authored_x >= 2150:
                 for i in range(6):
                     self.world.platform_named(f"final_draw_{i}").draw_progress = 1
-            if spawn_x >= 6300:
+            if authored_x >= 6300:
                 self.world.platform_named("last_line").draw_progress = 1
                 for event in self.director.events:
                     event.done = True
@@ -413,6 +493,8 @@ class Level:
         for event in self.director.events:
             if event.name == name:
                 event.done = True
+                event.active = False
+                self.flags.add(name)
 
     def draw_entities(self, surface, camera, renderer):
         for entity in self.entities.items:

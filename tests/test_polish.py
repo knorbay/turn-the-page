@@ -38,7 +38,7 @@ class PolishContracts(unittest.TestCase):
                                        SatelliteRelayPuzzle)):
                     entity.completed = True
             steps = sorted((p for p in world.platforms if p.name.startswith('vignette_')), key=lambda p:p.x1)
-            player = Player(start-90, 542)
+            player = Player(runtime.pacing_map(start-90), 542)
             player.on_ground = True
             particles = ParticleSystem()
             for step in steps:

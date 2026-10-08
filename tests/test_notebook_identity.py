@@ -26,36 +26,37 @@ class NotebookIdentityContracts(unittest.TestCase):
  def tearDown(self):self.tmp.cleanup()
  def advance(self,n=80):
   for _ in range(n):self.a.update(1/60,self.ctx)
- def test_tool_request_draws_then_grants_a_distinct_weapon(self):
-  self.assertTrue(self.a.choose('tool',self.ctx))
-  self.assertNotIn('margin_maul',self.g.weapons.unlocked)
+ def test_observed_tool_is_drawn_after_a_fight_and_preserves_current_weapon(self):
+  w=self.g.weapons;w.unlock('folded_shuriken');w.select('folded_shuriken')
+  self.a.first.completed=True;self.g.player.x=self.a.first.end_x+30
+  self.a.update(.01,self.ctx)
+  self.assertEqual(self.a.operation,'support_tool')
+  self.assertNotIn('pencil_blade',w.unlocked)
   self.advance()
-  self.assertEqual(self.g.weapons.current_id,'margin_maul')
+  self.assertIn('pencil_blade',w.available_ids)
+  self.assertEqual(w.current_id,'folded_shuriken')
   self.assertFalse(self.a.choose('road',self.ctx))
-  self.assertFalse(self.g.player.locked)
- def test_road_request_creates_actual_collision_and_survives_save(self):
-  self.a.choose('road',self.ctx)
-  self.assertFalse(any(p.collision_rects() for p in self.a.platforms))
-  self.advance()
+ def test_legacy_road_save_restores_actual_collision(self):
+  self.g.save.data['notebook_choices']['0']='road'
+  self.a._restore(self.ctx)
   self.assertTrue(all(p.collision_rects() for p in self.a.platforms))
-  self.assertNotIn('margin_maul',self.g.weapons.unlocked)
-  saved=SaveSystem(self.path)
-  self.assertEqual(saved.data['notebook_choices']['0'],'road')
+  self.g.save.write()
   self.g.level.load_chapter(0,'alive',self.g.player,self.g.camera)
   a=next(e for e in self.g.level.entities.items if isinstance(e,NotebookAgency))
   a.update(.01,self.g.level.context(self.g.player,self.g.camera,self.g.particles,self.g.sounds))
   self.assertTrue(all(p.draw_progress==1 for p in a.platforms))
- def test_low_ink_request_removes_threat_without_completing_room(self):
-  arena=self.a.first;arena.encounter_active=True
+ def test_low_ink_observation_restores_a_heart_without_erasing_a_foe(self):
+  arena=self.a.first;arena.encounter_active=True;arena.encounter_time=3
   enemy=InkSamurai(600);arena.enemies=[enemy];self.g.player.health=1
-  self.a.update(.01,self.ctx,True)
-  self.assertEqual(self.a.operation,'erase_enemy')
+  self.a.update(.01,self.ctx)
+  self.assertEqual(self.a.operation,'patch_player')
   self.assertFalse(enemy.dead)
   self.advance()
-  self.assertTrue(enemy.dead)
-  self.assertEqual(len(self.a.pets),1)
+  self.assertFalse(enemy.dead)
+  self.assertEqual(self.g.player.health,2)
+  self.assertFalse(hasattr(self.a,'pets'))
   self.assertFalse(arena.completed)
-  self.assertIn(arena.arena_id,self.a.used_erasers)
+  self.assertIn(arena.arena_id,self.a.used_patches)
  def test_boss_phase_draws_one_additive_landing(self):
   arena=self.a.first;arena.encounter_active=True
   boss=MoonCompassBoss(1800);boss.phase=2;arena.enemies=[boss]

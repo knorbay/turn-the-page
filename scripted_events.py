@@ -16,8 +16,12 @@ def combat_active(ctx):
                and not getattr(entity, "completed", False) for entity in entities)
 
 
-def artist_canvas_free(ctx):
-    return not combat_active(ctx) and not getattr(getattr(ctx, "director", None), "blocks_combat", False)
+def artist_canvas_free(ctx, owner=None, allow_in_combat=False):
+    director = getattr(ctx, "director", None)
+    available = getattr(director, "canvas_available", None)
+    return ((allow_in_combat or not combat_active(ctx)) and
+            (available(owner) if callable(available) else
+             not getattr(director, "blocks_combat", False)))
 
 
 @dataclass
@@ -62,13 +66,14 @@ class EventSequence:
 
     def update(self, dt: float, ctx: EventContext):
         if self.done or not self.steps:
+            ctx.player.release_lock(self.name)
+            self._release_camera(ctx)
             return
         if not self.allow_in_combat and combat_active(ctx):
             # Also protects direct practice entries or a restored checkpoint:
             # an unfinished traversal scene must never freeze a live fight.
             ctx.player.release_lock(self.name)
-            if self.active and self.steps[self.index].camera_x is not None:
-                ctx.camera.script_target = None
+            self._release_camera(ctx)
             return
         if not self.active:
             if not self.trigger(ctx):
@@ -84,8 +89,16 @@ class EventSequence:
                 step.start(ctx)
         if step.lock_player:
             ctx.player.acquire_lock(self.name)
-        if step.camera_x is not None:
-            ctx.camera.script_target = step.camera_x
+        else:
+            ctx.player.release_lock(self.name)
+        if step.lock_player and step.camera_x is not None:
+            target = getattr(ctx.camera, "set_script_target", None)
+            if callable(target):
+                target(step.camera_x, self.name)
+            else:
+                ctx.camera.script_target = step.camera_x
+        else:
+            self._release_camera(ctx)
         self.timer += dt
         progress = min(1.0, self.timer / max(.001, step.duration))
         if step.update:
@@ -97,12 +110,19 @@ class EventSequence:
         self.index += 1
         self.timer = 0
         self.started_step = False
+        self._release_camera(ctx)
         if self.index >= len(self.steps):
             self.done = True
             self.active = False
             ctx.player.release_lock(self.name)
-            ctx.camera.script_target = None
             ctx.level.flags.add(self.name)
+
+    def _release_camera(self, ctx):
+        release = getattr(ctx.camera, "release_script_target", None)
+        if callable(release):
+            release(self.name)
+        elif self.active:
+            ctx.camera.script_target = None
 
 
 @dataclass
@@ -129,6 +149,8 @@ class ArtistDirector:
         self.events: list[EventSequence] = []
         self.tool = ArtistTool()
         self.messages: list[WrittenMessage] = []
+        self.canvas_owner = None
+        self.canvas_in_combat = False
 
     def add(self, event: EventSequence):
         self.events.append(event)
@@ -136,13 +158,42 @@ class ArtistDirector:
 
     def update(self, dt, ctx):
         self.tool.visible = False
+        if self.canvas_owner is not None:
+            return
+        # One hand owns one stroke. Dormant scenes queue behind the current
+        # timeline instead of overwriting its tip or advancing off-screen.
+        current = next((event for event in self.events if event.active and not event.done), None)
+        if current is not None:
+            current.update(dt, ctx)
+            return
         for event in self.events:
             event.update(dt, ctx)
+            if event.active or self.tool.visible:
+                break
 
     @property
     def blocks_combat(self):
-        return any(event.active and not event.done and not event.allow_in_combat
-                   for event in self.events)
+        return ((self.canvas_owner is not None and not self.canvas_in_combat) or
+                any(event.active and not event.done and not event.allow_in_combat
+                    for event in self.events))
+
+    def canvas_available(self, owner=None):
+        if self.canvas_owner is not None:
+            return owner is self.canvas_owner
+        return not self.tool.visible and not any(
+            event.active and not event.done for event in self.events)
+
+    def claim_canvas(self, owner, allow_in_combat=False):
+        if owner is None or not self.canvas_available(owner):
+            return False
+        self.canvas_owner = owner
+        self.canvas_in_combat = allow_in_combat
+        return True
+
+    def release_canvas(self, owner):
+        if self.canvas_owner is owner:
+            self.canvas_owner = None
+            self.canvas_in_combat = False
 
     def write(self, x, y, text, progress, angry=False):
         message = next((m for m in self.messages if m.text == text and m.x == x), None)
@@ -153,6 +204,10 @@ class ArtistDirector:
         return message
 
     def draw(self, surface, camera, renderer):
+        self.draw_messages(surface, camera, renderer)
+        self.draw_tool(surface, camera)
+
+    def draw_messages(self, surface, camera, renderer):
         for message in self.messages:
             shown = message.text[:max(0, round(len(message.text) * message.progress))]
             if not shown:
@@ -162,6 +217,8 @@ class ArtistDirector:
             renderer.doodle_text(surface, shown, (x, round(message.y + camera.offset_y)), color,
                                  renderer.font if message.angry else renderer.font_small,
                                  -2 if message.angry else 1)
+
+    def draw_tool(self, surface, camera):
         if not self.tool.visible:
             return
         if self.tool.kind == "pencil":
@@ -208,7 +265,7 @@ class ArtistDirector:
 
 def draw_platform_event(name, trigger_x, platform, duration=2.0, lock=True, message=None):
     def start(ctx):
-        platform.draw_progress = 0
+        platform.begin_drawing()
         ctx.sounds.play("pencil")
 
     def update(ctx, progress):
@@ -219,7 +276,7 @@ def draw_platform_event(name, trigger_x, platform, duration=2.0, lock=True, mess
             ctx.director.write(platform.x1, platform.y - 90, message, progress)
 
     def finish(ctx):
-        platform.draw_progress = 1
+        platform.complete_drawing()
         ctx.camera.kick(3, .18)
 
     return EventSequence(name, lambda ctx: ctx.player.x >= trigger_x, [

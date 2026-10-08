@@ -61,6 +61,12 @@ class LivingMarginsContracts(unittest.TestCase):
         self.assertEqual(self.g.player.draw_amount,1)
     def test_practice_target_uses_real_weapon_hits(self):
         target=next(e for e in self.g.level.entities.items if isinstance(e,PracticeDrawing))
+        self.assertFalse(self.g.weapons.damage_enemy(target.target,1,1,0,0,'pencil',self.ctx))
+        self.g.weapons.unlock('folded_shuriken')
+        self.g.weapons.select('folded_shuriken')
+        self.g.player.x,self.g.player.y=1290,497
+        for _ in range(40):target.update(1/60,self.ctx)
+        self.assertEqual(target.target.notebook_reveal,1)
         for _ in range(2):
             target.target.invulnerable=0
             self.assertTrue(self.g.weapons.damage_enemy(target.target,1,1,0,0,'pencil',self.ctx))
@@ -78,6 +84,18 @@ class LivingMarginsContracts(unittest.TestCase):
         self.assertEqual(self.g.behavior.count('artist_reply'),1)
         self.assertEqual(a.text,'A small nod.')
         self.assertFalse(self.g.player.locked)
+    def test_repeated_discovery_input_does_not_answer_the_hidden_hello(self):
+        self.g.reset()
+        for _ in range(190):self.g.update(1/60,InputFrame())
+        self.assertTrue(self.g.artist_companion.say('hidden_hello',
+            'Can you hear me?','A small nod.'))
+        self.g.player.x,self.g.player.y=438,542
+        self.g.player.vx=self.g.player.vy=0
+        for _ in range(180):self.g.update(1/60,InputFrame(interact=True))
+        self.assertIn('old_first_figure',self.g.save.data['secrets'])
+        self.assertEqual(self.g.behavior.count('artist_reply'),0)
+        self.assertNotIn('heard_you',self.g.achievements.unlocked)
+        self.assertEqual(self.g.artist_companion.reply,'A small nod.')
     def test_sniper_freezes_target_before_shot(self):
         e=MarginSniper(700);e.state_time=0
         e.update(.01,self.ctx,(100,1000))

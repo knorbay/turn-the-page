@@ -50,7 +50,7 @@ class LostSketch(Entity):
             self.discovered = True
             self.acquired_time = 2.4
             ctx.level.discover_secret(self.secret_id, self.caption)
-            if sketch:
+            if sketch and not getattr(ctx.level, "toast", ""):
                 ctx.level.toast = collection_message(self.secret_id)
                 ctx.level.toast_time = 6
             ctx.sounds.play("pencil")
@@ -89,7 +89,7 @@ class LostSketch(Entity):
         renderer.rough_rect(surface,INK_LIGHT,card,1,5200+len(self.secret_id))
         label = ("LEARNED / " if self.discovered else "TECHNIQUE / ")+sketch.technique
         surface.blit(renderer.font_small.render(label,True,accent),(card.x+12,card.y+9))
-        for index,line in enumerate(wrap_text(sketch.benefit,renderer.font_small,width-24)):
+        for index,line in enumerate(wrap_text(sketch.benefit if getattr(sketch,"extra_effects",()) else sketch.detail,renderer.font_small,width-24)):
             surface.blit(renderer.font_small.render(line,True,INK),(card.x+12,card.y+34+index*19))
         trial = getattr(self, 'trial', None)
         prompt = ("Clipped into BACK PAGES" if self.discovered else

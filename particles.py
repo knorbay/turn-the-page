@@ -169,15 +169,24 @@ class ParticleSystem:
                     a=i*math.tau/16;r=radius if i%2==0 else radius*.27
                     points.append((x+math.cos(a)*r,y+math.sin(a)*r*.7))
                 pygame.draw.lines(surface,color,True,points,2)
+                pygame.draw.polygon(surface, color,
+                    [(x-5,y-2),(x-1,y-6),(x+5,y-1),(x+2,y+4),(x-4,y+3)])
+                # An offset red tick reads as the Artist's correction at the
+                # moment of contact, with a hard edge rather than a glow.
+                pygame.draw.line(surface, (157,57,56,color[3]),
+                                 (x+radius*.45,y-radius*.6),
+                                 (x+radius*.8,y-radius*.95), 2)
             elif p.kind == "return_ring":
                 radius = round(10+(1-alpha)*25)
                 pygame.draw.circle(surface, color, (x, y), radius, 2)
                 pygame.draw.lines(surface, color, False,
                     [(x-8, y), (x-1, y+7), (x+12, y-9)], 3)
             elif p.kind == "crumb":
-                pygame.draw.rect(surface, color, (x, y, size + 2, size), border_radius=1)
+                pygame.draw.polygon(surface, color,
+                    [(x,y),(x+size+2,y-1),(x+size+1,y+size),(x+1,y+size+1)])
             elif p.kind == "paper":
-                pygame.draw.line(surface, color, (x - size, y), (x + size, y + 1), 1)
+                pygame.draw.polygon(surface, color,
+                    [(x-size,y),(x+size,y-1),(x+size-1,y+2),(x-size+1,y+3)])
             elif p.kind == "slash":
                 speed = math.hypot(p.vx, p.vy)
                 if speed <= .001:

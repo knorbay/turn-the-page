@@ -20,6 +20,7 @@ import pygame
 
 from paper_renderer import jitter_line
 from page_arsenal import profile_for, draw_weapon_icon
+from boss_effectiveness import boss_damage, effectiveness_for
 from settings import INK, INK_LIGHT, PAPER
 
 
@@ -34,6 +35,8 @@ WEAPON_ORDER = (
     "carbon_lance",
     "folded_shuriken",
     "chalk_bomb",
+    "fold_crossbow",
+    "orbit_saw",
 )
 
 WEAPON_ALIASES = {
@@ -52,6 +55,8 @@ WEAPON_ALIASES = {
 }
 
 WEAPON_NAMES = {
+    "fold_crossbow": "FOLD CROSSBOW",
+    "orbit_saw": "ORBIT SAW",
     "carbon_lance": "CARBON RIFLE",
     "folded_shuriken": "RETURNING FOLD",
     "chalk_bomb": "CHALK CAPSULE",
@@ -97,7 +102,12 @@ def _live_enemies(items) -> list[object]:
         if identity in seen or _enemy_rect(item) is None:
             continue
         seen.add(identity)
-        if not getattr(item, "dead", False) and getattr(item, "active", True):
+        if (not getattr(item, "dead", False) and getattr(item, "active", True)
+                and not getattr(item, "artist_erasing", False)):
+            if (getattr(item, "notebook_spawn_pending", False)
+                    or getattr(item, "notebook_activation_blocked", False)
+                    or getattr(item, "notebook_reveal", 1) < 1):
+                continue
             result.append(item)
             pending.extend(getattr(item, "combat_targets", ()))
     return result
@@ -138,7 +148,22 @@ class ImpactMark:
         color = (*INK_LIGHT,alpha)
         radius = max(2, round(self.size * (.65 + .35 * fade)))
         rng = random.Random(self.seed)
-        if self.kind.endswith("_muzzle"):
+        if self.kind == "boss_strong":
+            # A clean, dark tear and an extra red retrace announce a useful
+            # material without borrowing a boss warning's filled red shape.
+            for offset in (-5, 0, 5):
+                pygame.draw.line(surface, (62, 64, 57, alpha),
+                                 (x-radius+offset, y+radius//2),
+                                 (x+radius+offset, y-radius//2), 3)
+            pygame.draw.line(surface, (146, 75, 61, alpha),
+                             (x-radius, y-radius//2), (x+radius, y+radius//2), 2)
+        elif self.kind == "boss_weak":
+            # Pale shallow hatching reads as a glancing mark, never a block.
+            for offset in (-4, 3):
+                pygame.draw.line(surface, (158, 153, 136, alpha),
+                                 (x-radius//2, y+offset),
+                                 (x+radius//2, y+offset-3), 1)
+        elif self.kind.endswith("_muzzle"):
             # A short paper-white flash with graphite edges; the heavy marker
             # blossoms wider while the pistol gives one sharp, dry tick.
             count=7 if self.kind.startswith("marker") else 5
@@ -221,6 +246,7 @@ class MeleeSwing:
     elapsed: float = 0.0
     hit_ids: set[int] = field(default_factory=set)
     echo_hit_ids: set[int] = field(default_factory=set)
+    weapon_id: str = ""
 
     @property
     def active(self):
@@ -318,6 +344,9 @@ class PaperProjectile:
     ricochet_loss: float = .84
     launch_support: tuple | None = None
     support_checked: bool = False
+    weapon_id: str = ""
+    pulse_ids: set[int] = field(default_factory=set)
+    tint: tuple = (73, 123, 146)
 
     @property
     def rect(self):
@@ -326,6 +355,19 @@ class PaperProjectile:
 
     def update(self, dt, ctx, enemies, solids, system):
         if not self.active:
+            return
+        if self.visual == "orbit_saw" and self.age >= .28:
+            # The thrown ring brakes into a small, visible field. Each cut
+            # is committed to that point; it never follows a fleeing enemy.
+            self.age += dt
+            self.life -= dt
+            self.vx = self.vy = 0
+            for pulse, when in enumerate((.36, .74)):
+                if self.age >= when and pulse not in self.pulse_ids:
+                    self.pulse_ids.add(pulse)
+                    self._orbit_cut(ctx, enemies, system)
+            if self.life <= 0:
+                self.active = False
             return
         if not self.support_checked:
             self.support_checked = True
@@ -377,6 +419,15 @@ class PaperProjectile:
                 if self.kind == "chalk_bomb":
                     self._detonate(ctx,enemies,system)
                     break
+                elif self.visual == "fold_bolt":
+                    self.x, self.y = old_x, old_y
+                    self._split_fold(ctx, system, reverse=True)
+                    break
+                elif self.visual == "orbit_saw":
+                    self.x, self.y = old_x, old_y
+                    self.vx = self.vy = 0
+                    self.age = max(self.age, .28)
+                    break
                 elif self.visual == "fold_star":
                     self.x, self.y = old_x, old_y
                     self.age = max(self.age, .42)
@@ -396,14 +447,23 @@ class PaperProjectile:
                 if self.kind == "chalk_bomb":
                     self._detonate(ctx,enemies,system)
                     break
+                if self.visual == "orbit_saw":
+                    self.x, self.y = old_x, old_y
+                    self.vx = self.vy = 0
+                    self.age = max(self.age, .28)
+                    break
                 self.hit_ids.add(identity)
                 direction = 1 if self.vx >= 0 else -1
                 applied = system.damage_enemy(
                     enemy, self.damage, direction, self.knockback,
                     self.stagger, self.kind, ctx, self.attack_id, source_x=old_x,
+                    weapon_id=self.weapon_id,
                 )
                 if applied:
                     system.impact(self.x, self.y, self.kind, self.radius + 6)
+                if self.visual == "fold_bolt":
+                    self._split_fold(ctx, system)
+                    break
                 if self.kind == "rubber_band" and self.bounces > 0:
                     self.vx *= -1
                     if self.visual != "pulse":
@@ -419,6 +479,40 @@ class PaperProjectile:
                     self.active = False
                 break
 
+    def _split_fold(self, ctx, system, reverse=False):
+        """Unfold on contact, leaving the first body out of the shard fan."""
+        if not self.active:
+            return
+        self.active = False
+        angle = math.atan2(self.vy, self.vx) + (math.pi if reverse else 0)
+        for offset in (-.48, 0, .48):
+            direction = pygame.Vector2(math.cos(angle+offset), math.sin(angle+offset))
+            system.projectiles.append(PaperProjectile(
+                "fold_shard", self.x+direction.x*8, self.y+direction.y*8,
+                direction.x*610, direction.y*610, .42, 4, .48, 55, .04,
+                visual="fold_shard", seed=system.next_seed(),
+                attack_id=self.attack_id, weapon_id=self.weapon_id,
+                hit_ids=set(self.hit_ids)))
+        system.impact(self.x, self.y, "fold_shard", 15)
+        _call(ctx, "sounds", "play", "paper_break")
+
+    def _orbit_cut(self, ctx, enemies, system):
+        center = pygame.Vector2(self.x, self.y)
+        for enemy in enemies:
+            rect = _enemy_rect(enemy)
+            if rect is None:
+                continue
+            nearest = pygame.Vector2(_clamp(self.x, rect.left, rect.right),
+                                     _clamp(self.y, rect.top, rect.bottom))
+            if nearest.distance_to(center) <= 49:
+                applied = system.damage_enemy(
+                    enemy, self.damage, 1 if rect.centerx >= self.x else -1,
+                    self.knockback, .08, "orbit_cut", ctx, self.attack_id,
+                    source_x=self.x, weapon_id=self.weapon_id)
+                if applied:
+                    system.impact(nearest.x, nearest.y, "orbit_cut", 16)
+        _call(ctx, "sounds", "play", "rubber")
+
     def _detonate(self, ctx, enemies, system):
         if not self.active:
             return
@@ -428,11 +522,17 @@ class PaperProjectile:
             rect = _enemy_rect(enemy)
             if rect is None:
                 continue
-            near = pygame.Vector2(rect.center).distance_to(center) <= 82
+            # A burst reaches the drawn body, including the edge of a tall
+            # boss. Measuring only its centre made a direct capsule collision
+            # explode harmlessly on the Final Editor's shoulder.
+            nearest = pygame.Vector2(_clamp(self.x, rect.left, rect.right),
+                                     _clamp(self.y, rect.top, rect.bottom))
+            near = nearest.distance_to(center) <= 82
             if near:
                 system.damage_enemy(enemy,.85,1 if rect.centerx>=self.x else -1,
                                     115,.15,"chalk_bomb",ctx,
-                                    source_x=self.x)
+                                    self.attack_id, source_x=self.x,
+                                    weapon_id=self.weapon_id)
         system.impact(self.x,self.y,"chalk_bomb",31)
         _call(ctx,"particles","paper_puff",self.x,self.y,9)
         _call(ctx,"sounds","play","paper_break")
@@ -482,6 +582,39 @@ class PaperProjectile:
 
     def draw(self, surface, camera):
         if not self.active:
+            return
+        if self.visual == "orbit_saw":
+            x, y = camera.screen_x(self.x), round(self.y+camera.offset_y)
+            settled = self.age >= .28
+            radius = 30 if settled else 11
+            color = self.tint
+            if settled:
+                pygame.draw.circle(surface, tuple((channel+230)//2 for channel in color), (x,y), 49, 1)
+                for index in range(4):
+                    a = index*math.tau/4
+                    pygame.draw.line(surface,color,
+                                     (x+math.cos(a)*44,y+math.sin(a)*44),
+                                     (x+math.cos(a)*51,y+math.sin(a)*51),1)
+            pygame.draw.circle(surface, color, (x,y), radius, 2)
+            pygame.draw.circle(surface, (227, 234, 218), (x,y), max(2,radius-5), 1)
+            for index in range(8):
+                a = self.age*14+index*math.tau/8
+                pygame.draw.line(surface,color,
+                                 (x+math.cos(a)*radius,y+math.sin(a)*radius),
+                                 (x+math.cos(a+.23)*(radius+5),y+math.sin(a+.23)*(radius+5)),2)
+            return
+        if self.visual in ("fold_bolt", "fold_shard"):
+            x, y = camera.screen_x(self.x), round(self.y+camera.offset_y)
+            direction = pygame.Vector2(self.vx, self.vy).normalize()
+            normal = pygame.Vector2(-direction.y, direction.x)
+            center = pygame.Vector2(x,y)
+            length = 13 if self.visual == "fold_bolt" else 7
+            points = [center+direction*length, center-direction*length+normal*5,
+                      center-direction*6, center-direction*length-normal*5]
+            pygame.draw.polygon(surface,(232,222,187),points)
+            pygame.draw.lines(surface,(109,87,59),True,points,1)
+            pygame.draw.line(surface,(148,111,70),center-direction*length,
+                             center+direction*length,1)
             return
         if self.visual == "fold_star":
             from page_arsenal import draw_weapon
@@ -589,8 +722,15 @@ class BaseWeapon:
             self.start_reload()
             _call(ctx, "sounds", "play", "reload")
             return False
+        shot_start = len(system.projectiles)
         fired = self.fire(system, ctx)
         if fired:
+            # Retain the authored tool on every hit even if the player changes
+            # selection while a shot, returning fold, or delayed trace travels.
+            for shot in system.projectiles[shot_start:]:
+                shot.weapon_id = self.weapon_id
+            if system.melee is not None:
+                system.melee.weapon_id = self.weapon_id
             self.cooldown = max(self.cooldown, self.fire_delay)
             if self.mag_size > 0:
                 self.ammo -= 1
@@ -600,6 +740,15 @@ class BaseWeapon:
 
     def fire(self, system, ctx):
         raise NotImplementedError
+
+
+class Unarmed(BaseWeapon):
+    """Safe, deliberate empty hands while the Artist is drawing a tool."""
+    weapon_id = "unarmed"
+    label = "EMPTY HANDS"
+
+    def fire(self, system, ctx):
+        return False
 
 
 class PencilBlade(BaseWeapon):
@@ -618,7 +767,7 @@ class PencilBlade(BaseWeapon):
             # A fresh chain cannot spend marks left by an earlier attempt.
             system._bowie_marks.clear()
 
-        # Each page's starter uses a different combat grammar.  The save id is
+        # Each page's optional close tool uses a different grammar. The save id is
         # intentionally stable, but these are authored attacks rather than one
         # combo with renamed stats.
         if style == "katana":
@@ -904,6 +1053,52 @@ class ChalkBomb(BaseWeapon):
         return True
 
 
+class FoldCrossbow(BaseWeapon):
+    """A single bolt opens into a forward fan on enemy or paper contact."""
+    weapon_id = "fold_crossbow"
+    label = "FOLD CROSSBOW"
+    mag_size = 1
+    reload_time = 1.15
+    fire_delay = .72
+
+    def fire(self, system, ctx):
+        direction = system.aim_direction
+        origin = system.muzzle(25)
+        profile = system.profile()
+        system.projectiles.append(PaperProjectile(
+            "fold_bolt", origin.x, origin.y, direction.x*profile.speed,
+            direction.y*profile.speed, profile.damage, 5, profile.lifetime,
+            profile.knockback, .10, gravity=profile.gravity, visual="fold_bolt",
+            seed=system.next_seed(), attack_id=system.attack_serial+1))
+        system.muzzle_flash("fold", origin, 12)
+        _call(ctx, "sounds", "play", "rubber")
+        return True
+
+
+class OrbitSaw(BaseWeapon):
+    """A short throw leaves two timed cuts at the player's chosen location."""
+    weapon_id = "orbit_saw"
+    label = "ORBIT SAW"
+    mag_size = 2
+    reload_time = 1.65
+    fire_delay = .65
+
+    def fire(self, system, ctx):
+        # One committed field at a time keeps its two pulses readable.
+        if any(shot.active and shot.visual == "orbit_saw" for shot in system.projectiles):
+            return False
+        direction = system.aim_direction
+        origin = system.muzzle(23)
+        profile = system.profile()
+        system.projectiles.append(PaperProjectile(
+            "orbit_cut", origin.x, origin.y, direction.x*profile.speed,
+            direction.y*profile.speed, profile.damage, 11, profile.lifetime,
+            profile.knockback, .08, visual="orbit_saw", seed=system.next_seed(),
+            attack_id=system.attack_serial+1, tint=profile.accent))
+        _call(ctx, "sounds", "play", "rubber")
+        return True
+
+
 class Excalibur(BaseWeapon):
     """Signature-page power reversal, intentionally not a campaign staple."""
 
@@ -960,13 +1155,14 @@ class WeaponSystem:
     def __init__(self, player):
         self.player = player
         instances = (PencilBlade(), InkPistol(), MarkerShotgun(), EraserCannon(),
-                     RubberBand(), Excalibur(), MarginMaul(), CarbonLance(), ReturningFold(), ChalkBomb())
+                     RubberBand(), Excalibur(), MarginMaul(), CarbonLance(), ReturningFold(), ChalkBomb(),
+                     FoldCrossbow(), OrbitSaw(), Unarmed())
         self.weapons = {weapon.weapon_id: weapon for weapon in instances}
         for weapon in self.weapons.values():
             weapon.system = self
         self.page_index = None
-        self.current_id = "pencil_blade"
-        self.unlocked: set[str] = {"pencil_blade"}
+        self.current_id = "unarmed"
+        self.unlocked: set[str] = set()
         self.projectiles: list[PaperProjectile] = []
         self.impacts: list[ImpactMark] = []
         self.melee: MeleeSwing | None = None
@@ -981,6 +1177,10 @@ class WeaponSystem:
         self.active_loadout: set[str] | None = None
         self._boss_marker_volleys: set[tuple[int, int]] = set()
         self._bowie_marks: dict[int, tuple[int, float]] = {}
+        self.boss_feedback: list[dict] = []
+        self._effect_feedback_cooldowns: dict[int, float] = {}
+        self.tool_hint_time = 0.0
+        self.player.set_weapon_pose("unarmed", 0, 0)
 
     @property
     def ammo(self):
@@ -992,7 +1192,7 @@ class WeaponSystem:
 
     @property
     def current(self):
-        return self.weapons[self.current_id]
+        return self.weapons.get(self.current_id, self.weapons["unarmed"])
 
     def profile(self, weapon_id=None):
         return profile_for(self.page_index, weapon_id or self.current_id)
@@ -1019,7 +1219,7 @@ class WeaponSystem:
         self.page_index = page_index
         self.player.arsenal_page = page_index
         if changed:
-            self._bowie_marks.clear()
+            self.reset_scene()
         for weapon_id, weapon in self.weapons.items():
             if weapon_id == "excalibur":
                 continue
@@ -1048,7 +1248,7 @@ class WeaponSystem:
 
     def unlock(self, weapon_id):
         resolved = self._resolve_id(weapon_id)
-        if resolved is None:
+        if resolved is None or resolved == "unarmed":
             return False
         was_new = resolved not in self.unlocked
         self.unlocked.add(resolved)
@@ -1056,38 +1256,93 @@ class WeaponSystem:
 
     def set_page_loadout(self, weapon_ids):
         """Restrict selection for one page without forgetting found tools."""
+        if weapon_ids is None:
+            self.active_loadout = None
+            self._ensure_selection()
+            return None
         resolved = {self._resolve_id(item) for item in weapon_ids}
-        resolved.discard(None)
-        self.active_loadout = resolved or None
-        if self.active_loadout is not None and self.current_id not in self.active_loadout:
-            fallback = next((weapon_id for weapon_id in WEAPON_ORDER
-                             if weapon_id in self.unlocked and weapon_id in self.active_loadout),
-                            None)
-            if fallback is not None:
-                self.current_id = fallback
-        return set(self.active_loadout or ())
+        resolved.difference_update((None, "unarmed"))
+        self.active_loadout = resolved
+        self._ensure_selection()
+        return set(self.active_loadout)
+
+    def _ensure_selection(self):
+        available = self.available_ids
+        desired = self.current_id if self.current_id in available else next(iter(available), "unarmed")
+        if desired != self.current_id:
+            self._clear_attacks()
+            self.current_id = desired
+        self.player.set_weapon_pose(self.current_id, 0, 0)
+
+    def _clear_attacks(self):
+        self.projectiles.clear()
+        self.melee = None
+        self.combo_index = 0
+        self.combo_window = 0
+        self.fire_buffer = 0
+        self._bowie_marks.clear()
+        self._boss_marker_volleys.clear()
+        self.player.combat_swing = None
+
+    def reset_scene(self):
+        """Release old-world combat references without changing saved tools.
+
+        A direct checkpoint/page load has the same cleanup boundary as a fold
+        or respawn: buffered strikes, captions and targets belong to its old
+        paper. Ownership and magazine counts remain available for restoration.
+        """
+        self._clear_attacks()
+        self.impacts.clear()
+        self.boss_feedback.clear()
+        self._effect_feedback_cooldowns.clear()
+        self._last_enemies.clear()
+        self.aim_target = None
+        self.tool_hint_time = 0
+        self.attack_serial = 0
+        self.player.attack_serial = 0
+        self.player.weapon_recoil = 0
+        self.player.set_weapon_pose(self.current_id, 0, 0)
+        for weapon in self.weapons.values():
+            weapon.cooldown = 0
+            weapon.reload_timer = 0
 
     def constrain_page_inventory(self, weapon_ids, reset=False):
         """Make ownership page-local while retaining same-page checkpoints."""
         allowed = {self._resolve_id(item) for item in weapon_ids}
-        allowed.discard(None)
-        allowed.add("pencil_blade")
+        allowed.difference_update((None, "unarmed"))
         if reset:
-            self.unlocked = {"pencil_blade"}
+            self.unlocked.clear()
+            self._clear_attacks()
         else:
             self.unlocked.intersection_update(allowed)
-            self.unlocked.add("pencil_blade")
-        if self.current_id not in self.unlocked:
-            self.current_id = "pencil_blade"
         self.set_page_loadout(allowed)
         return set(self.unlocked)
+
+    def lend_drawn_tool(self, weapon_id, replace=False):
+        """Activate a completed Artist drawing without inventing ammunition.
+
+        A page can replace the whole temporary loadout with one drawn tool.
+        Call only when the physical offer has finished drawing, not on entry.
+        Ordinary pickups can continue to use unlock() followed by select().
+        """
+        resolved = self._resolve_id(weapon_id)
+        if resolved is None or resolved == "unarmed":
+            return False
+        if self.active_loadout is not None and resolved not in self.active_loadout:
+            return False
+        if replace:
+            self.unlocked.clear()
+            self._clear_attacks()
+        self.unlock(resolved)
+        self.select(resolved)
+        return True
 
     def erase_page_tools(self):
         """Physically concluded pages keep no combat inventory."""
         erased = [weapon_id for weapon_id in WEAPON_ORDER
-                  if weapon_id in self.unlocked and weapon_id != "pencil_blade"]
-        self.unlocked = {"pencil_blade"}
-        self.current_id = "pencil_blade"
+                  if weapon_id in self.unlocked]
+        self.unlocked.clear()
+        self.current_id = "unarmed"
         self.projectiles.clear()
         self.impacts.clear()
         self.melee = None
@@ -1096,11 +1351,14 @@ class WeaponSystem:
         self.fire_buffer = 0
         self._boss_marker_volleys.clear()
         self._bowie_marks.clear()
+        self.boss_feedback.clear()
+        self._effect_feedback_cooldowns.clear()
+        self.tool_hint_time = 0
         for weapon in self.weapons.values():
             weapon.cooldown = 0
             weapon.reload_timer = 0
             weapon.ammo = weapon.mag_size
-        self.player.set_weapon_pose("pencil_blade", 0, 0)
+        self.player.set_weapon_pose("unarmed", 0, 0)
         self.player.combat_swing = None
         return erased
 
@@ -1117,6 +1375,8 @@ class WeaponSystem:
         self.combo_window = 0
         self.fire_buffer = 0
         self._bowie_marks.clear()
+        self.tool_hint_time = 2.4
+        self.player.set_weapon_pose(self.current_id, 0, 0)
         return True
 
     def cycle(self, direction=1):
@@ -1125,7 +1385,9 @@ class WeaponSystem:
                      and (self.active_loadout is None or weapon_id in self.active_loadout)]
         if not available:
             return False
-        index = available.index(self.current_id) if self.current_id in available else 0
+        if self.current_id not in available:
+            return self.select(available[0 if direction >= 0 else -1])
+        index = available.index(self.current_id)
         return self.select(available[(index + (1 if direction >= 0 else -1)) % len(available)])
 
     def reload(self, weapon_id=None):
@@ -1144,7 +1406,9 @@ class WeaponSystem:
         if reload_pressed:
             if self.reload():
                 _call(ctx, "sounds", "play", "reload")
-        if getattr(self.player, "locked", False) or getattr(self.player,"health",1) <= 0:
+        if (getattr(self.player, "locked", False) or getattr(self.player,"health",1) <= 0
+                or self.current_id == "unarmed"):
+            self.fire_buffer = 0
             return False
         if fire_pressed:
             self.fire_buffer = .12
@@ -1167,6 +1431,7 @@ class WeaponSystem:
         for weapon in self.weapons.values():
             weapon.update(dt)
         self.fire_buffer = max(0, self.fire_buffer - dt)
+        self.tool_hint_time = max(0, self.tool_hint_time - dt)
         self.combo_window = max(0, self.combo_window - dt)
         self._bowie_marks = {
             identity: (count, remaining-dt)
@@ -1177,6 +1442,11 @@ class WeaponSystem:
             self.combo_index = 0
         live = _live_enemies(enemies)
         self._last_enemies = live
+        self._effect_feedback_cooldowns = {identity: remaining-dt
+            for identity, remaining in self._effect_feedback_cooldowns.items() if remaining > dt}
+        for feedback in self.boss_feedback:
+            feedback["time"] -= dt
+        self.boss_feedback = [feedback for feedback in self.boss_feedback if feedback["time"] > 0]
         if self.melee is not None:
             self.melee.elapsed += dt
             if self.melee.active:
@@ -1213,7 +1483,7 @@ class WeaponSystem:
                                   and getattr(enemy, "kind", "") != "boss" else damage * 1.45)
 
                     applied = self.damage_enemy(enemy, damage, direction, knockback,
-                                                stagger, kind, ctx)
+                                                stagger, kind, ctx, weapon_id=swing.weapon_id)
                     if applied and swing.style == "bowie":
                         if swing.combo == 1:
                             self._bowie_marks[identity] = (1, .86)
@@ -1262,8 +1532,10 @@ class WeaponSystem:
         self.impacts = [mark for mark in self.impacts if mark.life > 0]
 
     def damage_enemy(self, enemy, damage, direction, knockback, stagger, damage_kind, ctx,
-                     attack_id=0, source_x=None):
-        if getattr(enemy, "dead", False) or getattr(enemy, "notebook_reveal", 1) < 1:
+                     attack_id=0, source_x=None, weapon_id=None):
+        if (getattr(enemy, "dead", False) or getattr(enemy, "notebook_reveal", 1) < 1
+                or getattr(enemy, "artist_erasing", False)
+                or getattr(enemy, "notebook_activation_blocked", False)):
             return False
         boss_target = bool(getattr(enemy, "is_boss", False)
                            or getattr(enemy, "kind", "") == "boss")
@@ -1271,6 +1543,10 @@ class WeaponSystem:
         if damage_kind == "marker" and attack_id and boss_target \
                 and volley_key in self._boss_marker_volleys:
             return False
+        source_weapon = self._weapon_for_hit(damage_kind, weapon_id)
+        effect = effectiveness_for(enemy, source_weapon, damage_kind)
+        if boss_target:
+            knockback *= 1.22 if effect.label == "strong" else .65 if effect.label == "weak" else 1.0
         weapon_hit = getattr(enemy, "hit_from_weapon", None)
         if callable(weapon_hit):
             # Stateful enemies own their armor and counter-play windows.  In
@@ -1278,6 +1554,8 @@ class WeaponSystem:
             # One's state before it can decide whether the wall-crash window
             # is open.
             tags = {damage_kind}
+            if source_weapon:
+                tags.add(f"weapon:{source_weapon}")
             if damage_kind == "eraser":
                 tags.update(("eraser", "heavy"))
             elif damage_kind == "marker" or damage_kind.endswith("finisher") \
@@ -1299,6 +1577,8 @@ class WeaponSystem:
             applied = weapon_hit(damage, knockback, source, tags, ctx) is not False
             if applied and damage_kind == "marker" and attack_id and boss_target:
                 self._boss_marker_volleys.add(volley_key)
+            if applied and boss_target:
+                self._boss_hit_feedback(enemy, effect)
             return applied
         armor = getattr(enemy, "armor", 0)
         armored = bool(getattr(enemy, "armored", False) or armor > 0)
@@ -1321,6 +1601,9 @@ class WeaponSystem:
             if hasattr(enemy, "stagger_cooldown"):
                 enemy.stagger_cooldown = max(float(getattr(enemy, "stagger_cooldown", 0)), stagger)
 
+        # Legacy targets without the stateful API get the same material table.
+        if boss_target:
+            damage = boss_damage(damage, enemy, {f"weapon:{source_weapon}"})
         applied = False
         method = getattr(enemy, "take_damage", None) or getattr(enemy, "damage", None)
         if callable(method):
@@ -1337,6 +1620,8 @@ class WeaponSystem:
 
         if not applied:
             return False
+        if boss_target:
+            self._boss_hit_feedback(enemy, effect)
         if damage_kind == "marker" and attack_id and boss_target:
             self._boss_marker_volleys.add(volley_key)
         game = getattr(ctx, "game", None)
@@ -1389,6 +1674,39 @@ class WeaponSystem:
                 game.hit_stop = max(getattr(game, "hit_stop", 0), duration)
         return True
 
+    def _weapon_for_hit(self, damage_kind, weapon_id=None):
+        resolved = self._resolve_id(weapon_id)
+        if resolved in WEAPON_ORDER:
+            return resolved
+        if damage_kind == "ink" and self.current_id in ("ink_pistol", "carbon_lance", "folded_shuriken"):
+            return self.current_id
+        canonical = {
+            "ink": "ink_pistol", "marker": "marker_shotgun", "eraser": "eraser_cannon",
+            "rubber_band": "rubber_band", "chalk_bomb": "chalk_bomb",
+            "excalibur": "excalibur", "maul_finisher": "margin_maul", "ion_wave": "pencil_blade",
+        }.get(damage_kind)
+        if canonical:
+            return canonical
+        if damage_kind.startswith(("pencil", "katana_", "bowie_", "field_", "ion_edge", "redraw")):
+            return "pencil_blade"
+        return self.current_id if self.current_id in WEAPON_ORDER else None
+
+    def _boss_hit_feedback(self, enemy, effect):
+        enemy.last_weapon_effectiveness = effect.label
+        enemy.last_weapon_multiplier = effect.multiplier
+        if effect.label == "normal":
+            return
+        rect = _enemy_rect(enemy)
+        if rect is None:
+            return
+        self.impact(rect.centerx, rect.centery,
+                    f"boss_{effect.label}", 24 if effect.label == "strong" else 12)
+        if id(enemy) not in self._effect_feedback_cooldowns:
+            self.boss_feedback.append({"x": rect.centerx, "y": rect.top-20,
+                                       "label": "deep mark" if effect.label == "strong" else "faint mark",
+                                       "strong": effect.label == "strong", "time": .82})
+            self._effect_feedback_cooldowns[id(enemy)] = .9
+
     def impact(self, x, y, kind, size=13):
         self.impacts.append(ImpactMark(float(x), float(y), kind, size=float(size), seed=self.next_seed()))
 
@@ -1397,6 +1715,14 @@ class WeaponSystem:
                            life=.095,max_life=.095,size=size,seed=self.next_seed()))
 
     def muzzle(self, distance):
+        # Guns and emitters fire from the same authored barrel landmark their
+        # drawing uses. Melee/thrown origins retain the existing combat reach.
+        attachment = getattr(self.player, "weapon_attachment", None)
+        if callable(attachment) and self.current_id in (
+                "ink_pistol", "marker_shotgun", "eraser_cannon", "rubber_band", "carbon_lance",
+                "fold_crossbow", "orbit_saw"):
+            angle = math.atan2(self.aim_direction.y, self.aim_direction.x)
+            return attachment(aim_angle=angle).muzzle
         rect = self.player.rect
         origin = pygame.Vector2(self.player.center_x, rect.centery - 5)
         return origin + self.aim_direction * distance
@@ -1450,11 +1776,12 @@ class WeaponSystem:
 
     def snapshot(self):
         return {
-            "version": 1,
+            "version": 2,
             "current_id": self.current_id,
             "unlocked": [weapon_id for weapon_id in WEAPON_ORDER if weapon_id in self.unlocked],
             "ammo": self.ammo,
             "reserve": self.reserve,
+            "active_loadout": None if self.active_loadout is None else sorted(self.active_loadout),
         }
 
     def restore(self, data):
@@ -1462,8 +1789,15 @@ class WeaponSystem:
             return False
         unlocked = {self._resolve_id(item) for item in data.get("unlocked", [])}
         unlocked.discard(None)
-        if unlocked:
-            self.unlocked = unlocked
+        unlocked.discard("unarmed")
+        self.unlocked = unlocked
+        if "active_loadout" in data:
+            loadout = data["active_loadout"]
+            if loadout is None:
+                self.active_loadout = None
+            elif isinstance(loadout, (list, tuple, set)):
+                self.active_loadout = {self._resolve_id(item) for item in loadout}
+                self.active_loadout.difference_update((None, "unarmed"))
         for weapon_id, amount in data.get("ammo", {}).items():
             resolved = self._resolve_id(weapon_id)
             weapon = self.weapons.get(resolved)
@@ -1481,9 +1815,9 @@ class WeaponSystem:
                 except (TypeError, ValueError):
                     pass
         desired = self._resolve_id(data.get("current_id", self.current_id))
-        fallback = next((weapon_id for weapon_id in WEAPON_ORDER if weapon_id in self.unlocked),
-                        "pencil_blade")
-        self.current_id = desired if desired in self.unlocked else fallback
+        available = self.available_ids
+        fallback = next(iter(available), "unarmed")
+        self.current_id = desired if desired in available else fallback
         self.projectiles.clear()
         self.impacts.clear()
         self.melee = None
@@ -1495,6 +1829,10 @@ class WeaponSystem:
         self.fire_buffer = 0
         self._boss_marker_volleys.clear()
         self._bowie_marks.clear()
+        self.boss_feedback.clear()
+        self._effect_feedback_cooldowns.clear()
+        self.tool_hint_time = 0
+        self.player.set_weapon_pose(self.current_id, 0, 0)
         for weapon in self.weapons.values():
             weapon.cooldown = 0
             weapon.reload_timer = 0
@@ -1506,9 +1844,15 @@ class WeaponSystem:
             projectile.draw(surface, camera)
         for mark in self.impacts:
             mark.draw(surface, camera)
+        for feedback in self.boss_feedback:
+            renderer.doodle_text(surface, feedback["label"],
+                                 (camera.screen_x(feedback["x"])-36,
+                                  round(feedback["y"]+camera.offset_y)),
+                                 (80, 103, 75) if feedback["strong"] else (139, 127, 105),
+                                 renderer.font_small, -1)
         if self.melee is not None:
             self._draw_melee(surface, camera)
-        if self.aim_target is not None and self.current_id != "pencil_blade":
+        if self.aim_target is not None and self.current_id not in ("pencil_blade", "unarmed"):
             x, y = camera.screen_x(self.aim_target.x), round(self.aim_target.y + camera.offset_y)
             color = (113, 88, 82) if self.current_id == "eraser_cannon" else INK_LIGHT
             pygame.draw.arc(surface, color, (x - 8, y - 8, 16, 16), .2, 1.35, 1)
@@ -1670,50 +2014,75 @@ class WeaponSystem:
         surface.blit(layer,(round(origin.x)-140,round(origin.y)-140))
 
     def draw_hud(self, surface, renderer, pos=(26, 604), controller=False):
+        if self.current_id == "unarmed":
+            return
         x, y = pos
-        available = self.available_ids
-        panel = pygame.Rect(x, y, 338 + 46*max(0,len(available)-1), 82)
+        weapon = self.current
+        profile = self.profile()
+        font = renderer.font_small
+        status = ""
+        cues = self.technique_cues()
+        if any(kind == "cuts" and count == 2 for _, kind, count, _ in cues):
+            status = "two cuts held · finish"
+        elif any(kind == "execution" and count == 2 for _, kind, count, _ in cues):
+            status = "third cut · exposed wound"
+        elif self.current_id == "folded_shuriken" and any(p.active and p.visual == "fold_star" for p in self.projectiles):
+            status = "returning · line up the fold"
+        elif self.current_id == "margin_maul" and self.melee is not None:
+            status = "winding up" if not self.melee.active else "rub out incoming shots"
+        elif self.tool_hint_time > 0 and len(self.available_ids) > 1:
+            status = "LB / D-PAD" if controller else "Q / wheel"
+
+        def text_width(text):
+            return font.size(text)[0] if hasattr(font, "size") else len(text)*8
+
+        # Reserve the translated reload word even while the magazine is full,
+        # so reloading cannot spill out or make the plate suddenly resize.
+        ammo_reserve = (max(88, text_width("reload")+24,
+                            text_width(f"{weapon.mag_size} / {weapon.mag_size}")+24)
+                        if weapon.mag_size > 0 else 0)
+        width = max(230, max(text_width(profile.label), text_width(status))+68+ammo_reserve)
+        panel = pygame.Rect(x, y, min(width, surface.get_width()-x-16), 53)
         veil = pygame.Surface(panel.size, pygame.SRCALPHA)
         veil.fill((*PAPER, 232))
         surface.blit(veil, panel.topleft)
         if hasattr(renderer, "rough_rect"):
             renderer.rough_rect(surface, INK_LIGHT, panel, 1, 913)
-        profile = self.profile()
-        renderer.doodle_text(surface, profile.label, (x + 14, y + 5), INK, renderer.font_small, -1)
-        weapon = self.current
-        role = "Finishing stroke" if self.current_id == "pencil_blade" and self.combo_index == 3 and self.melee else profile.role
-        cues = self.technique_cues()
-        if any(kind == "cuts" and count == 2 for _, kind, count, _ in cues):
-            role = "two cuts held · finish the mark"
-        elif any(kind == "execution" and count == 2 for _, kind, count, _ in cues):
-            role = "third cut · execute the wound"
-        renderer.doodle_text(surface, role, (x + 14, y + 27), INK_LIGHT, renderer.font_small)
-        for index, weapon_id in enumerate(available):
-            bx = x + 32 + index * 46
-            selected = weapon_id == self.current_id
-            if selected:
-                pygame.draw.rect(surface, (228, 218, 192), (bx-21,y+48,42,28), border_radius=3)
-                pygame.draw.line(surface, profile.accent, (bx-18,y+77), (bx+18,y+77), 2)
-            self.draw_icon(surface,weapon_id,(bx,y+62),size=35)
-        if len(available) > 1:
-            renderer.doodle_text(surface,"LB / D-PAD" if controller else "Q / wheel",
-                                 (x+28+len(available)*46,y+55),INK_LIGHT,renderer.font_small)
+        self.draw_icon(surface, self.current_id, (x+23, y+25), size=37)
+        ammo_x = panel.right - ammo_reserve + 12
+        label_limit = max(1, (ammo_x-16 if ammo_reserve else panel.right-12)-(x+49))
+
+        def draw_text(text, position, color, limit, angle=0):
+            if text_width(text) <= limit:
+                renderer.doodle_text(surface, text, position, color, font, angle)
+                return
+            image = font.render(text, True, color)
+            image = pygame.transform.smoothscale(image,
+                (limit, max(1, round(image.get_height()*limit/image.get_width()))))
+            surface.blit(image, position)
+
+        draw_text(profile.label, (x+49, y+7), INK, label_limit, -1)
+        if status:
+            draw_text(status, (x+49, y+29), INK_LIGHT, label_limit)
         if weapon.mag_size > 0:
-            ammo_x = panel.right - 105
-            status = "RELOADING" if weapon.reloading else f"{weapon.ammo} / {weapon.mag_size}"
-            renderer.doodle_text(surface,status,(ammo_x,y+5),profile.accent if weapon.reloading else INK,renderer.font_small)
+            ammo_text = "reload" if weapon.reloading else f"{weapon.ammo} / {weapon.mag_size}"
+            draw_text(ammo_text, (ammo_x,y+7), profile.accent if weapon.reloading else INK,
+                      max(1, panel.right-12-ammo_x))
             if weapon.reloading:
                 duration = getattr(weapon,"reload_duration",weapon.reload_time)
                 progress = _clamp(1-weapon.reload_timer/max(.001,duration),0,1)
-                pygame.draw.line(surface,(182,172,151),(ammo_x,y+24),(panel.right-14,y+24),2)
-                pygame.draw.line(surface,profile.accent,(ammo_x,y+24),(ammo_x+round(progress*91),y+24),3)
+                pygame.draw.line(surface,(182,172,151),(ammo_x,y+33),(panel.right-12,y+33),2)
+                pygame.draw.line(surface,profile.accent,(ammo_x,y+33),
+                                 (ammo_x+round(progress*(panel.right-12-ammo_x)),y+33),3)
             else:
                 for index in range(weapon.mag_size):
                     color = INK if index < weapon.ammo else (181,173,153)
-                    pygame.draw.line(surface,color,(ammo_x+index*9,y+23),(ammo_x+index*9+3,y+23),2)
+                    spacing = min(8, 64/max(1,weapon.mag_size))
+                    pygame.draw.line(surface,color,(ammo_x+index*spacing,y+33),(ammo_x+index*spacing+3,y+33),2)
 
 
 __all__ = [
-    "WeaponSystem", "BaseWeapon", "PencilBlade", "InkPistol", "MarkerShotgun",
-    "EraserCannon", "RubberBand", "Excalibur", "PaperProjectile", "MeleeSwing", "WEAPON_ORDER",
+    "WeaponSystem", "BaseWeapon", "Unarmed", "PencilBlade", "InkPistol", "MarkerShotgun",
+    "EraserCannon", "RubberBand", "Excalibur", "FoldCrossbow", "OrbitSaw",
+    "PaperProjectile", "MeleeSwing", "WEAPON_ORDER",
 ]

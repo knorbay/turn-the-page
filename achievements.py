@@ -1,5 +1,6 @@
 """Small, persistent achievements earned from facts already recorded by the game."""
 from __future__ import annotations
+from sketches import SKETCHES
 
 from collections import deque
 from dataclasses import dataclass
@@ -21,7 +22,7 @@ ACHIEVEMENTS = (
     Achievement("three_revisions", "REWRITE THE ROUTE", "Solve all three page route puzzles."),
     Achievement("bestiary", "FIELD NOTES", "Defeat twelve different enemy kinds."),
     Achievement("new_ink", "UNFAMILIAR INK", "Defeat a Fold Duelist, Margin Sniper and Split Lantern."),
-    Achievement("full_sketchbook", "EVERY LOST LINE", "Collect all twelve Lost Sketches."),
+    Achievement("full_sketchbook", "EVERY LOST LINE", "Collect every Lost Sketch and secret rune."),
     Achievement("six_signatures", "SIX SIGNATURES", "Defeat all six named bosses."),
     Achievement("ten_returns", "POST OFFICE", "Perfectly return ten incoming shots."),
     Achievement("twenty_rooms", "MARGIN EXPLORER", "Clear twenty encounters."),
@@ -81,7 +82,7 @@ class AchievementTracker:
             "bestiary": sum(int(n) > 0 for n in enemy_defeats.values()) >= 12,
             "new_ink": all(int(enemy_defeats.get(k, 0)) > 0 for k in
                            ("fold_duelist", "margin_sniper", "split_lantern")),
-            "full_sketchbook": len(set(game.save.data.get("secrets", ()))) >= 12,
+            "full_sketchbook": set(s.secret_id for s in SKETCHES).issubset(game.save.data.get("secrets", ())),
             "six_signatures": {"moon_compass", "wanted_sketch", "railroad_stapler",
                                "orbital_mistake", "scissor_director", "final_editor"}.issubset(boss_times),
             "ten_returns": behavior.count("perfect_return") >= 10,

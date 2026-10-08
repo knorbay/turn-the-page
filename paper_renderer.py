@@ -41,11 +41,17 @@ class PaperRenderer:
         self.page_styles = [style for _, style in recipes]
         self.paper = self.pages[1]
         self.paper_two = self.pages[2]
-        self.font_small = pygame.font.Font(None, 24)
-        self.font = pygame.font.Font(None, 34)
-        self.font_big = pygame.font.Font(None, 72)
+        # Keep the interface in a clear ink face. Unlike pygame's built-in
+        # Latin subset, these fonts include dotted/dotless Turkish letters.
+        face = pygame.font.match_font("arial,dejavusans,liberationsans")
+        from localization import LocalizedFont
+        self.font_small = LocalizedFont(pygame.font.Font(face, 21))
+        self.font = LocalizedFont(pygame.font.Font(face, 28))
+        self.font_big = LocalizedFont(pygame.font.Font(face, 62))
         from notebook_notes import NotebookAnnotations
         self.notebook_notes = NotebookAnnotations()
+        from scenic_backgrounds import ScenicBackgrounds
+        self.scenery = ScenicBackgrounds()
 
     def _make_paper(self, base, seed, style="first_line"):
         surf = pygame.Surface((WIDTH, HEIGHT))
@@ -55,6 +61,13 @@ class PaperRenderer:
             shade = rng.choice([-7, -4, 3, 5])
             color = tuple(max(0, min(255, c + shade)) for c in base)
             surf.set_at((rng.randrange(WIDTH), rng.randrange(HEIGHT)), color)
+        # Short, fixed fibres give the paper a dry print texture without a
+        # blur or an animated noise layer behind readable ink silhouettes.
+        fibre = tuple(max(0, c - 11) for c in base)
+        for _ in range(95):
+            x, y = rng.randrange(WIDTH), rng.randrange(HEIGHT)
+            pygame.draw.line(surf, fibre, (x, y),
+                             (x + rng.randrange(2, 10), y), 1)
         if style == "samurai_collage":
             # Long pale fibres belong to the sheet. World motifs are drawn in
             # camera space below so the same sun/torii is not stamped on every
@@ -104,9 +117,11 @@ class PaperRenderer:
         for index in range(first, first + math.ceil(WIDTH / spacing) + 3):
             yield index, round(index * spacing - travelled + seed_offset)
 
-    def draw_world_backdrop(self, surface, camera, page, time=0.0):
-        """Draw sparse, world-moving scenery instead of a repeated wallpaper."""
-        if page == 0:
+    def draw_world_backdrop(self, surface, camera, page, time=0.0, arena=None):
+        """Layer local scenery under the world's readable notebook landmarks."""
+        if self.scenery is not None:
+            self.scenery.draw(surface, camera, page, time, arena)
+        elif page == 0:
             self._draw_ronin_backdrop(surface, camera)
         elif page == 1:
             self._draw_western_backdrop(surface, camera)
@@ -200,6 +215,11 @@ class PaperRenderer:
         sun_x = round(865 - camera.x * .055)
         pygame.draw.circle(wash, (178, 65, 59, 38), (sun_x, 150), 104)
         pygame.draw.circle(wash, (153, 55, 52, 105), (sun_x, 150), 104, 3)
+        # Dry-brush scoring interrupts the sun instead of softening its edge.
+        for y in range(70, 238, 13):
+            half = round(math.sqrt(max(0, 104**2 - (y-150)**2)))
+            pygame.draw.line(wash, (151, 58, 54, 26),
+                             (sun_x-half+9, y), (sun_x+half-9, y+1), 1)
         # Two sumi-e ridges move at different speeds and leave quiet sky above.
         for layer, (factor, baseline, color) in enumerate((
                 (.10, 410, (77, 83, 72, 28)),
@@ -222,6 +242,8 @@ class PaperRenderer:
                 bx = x + stalk * 25 + rng.randrange(-8, 9)
                 top = rng.randrange(170, 300)
                 pygame.draw.line(surface, (75, 88, 61), (bx, base_y), (bx - 11, top), 3)
+                pygame.draw.line(surface, (156, 159, 122),
+                                 (bx + 2, base_y - 5), (bx - 8, top + 5), 1)
                 for node_y in range(top + 40, base_y, 70):
                     pygame.draw.line(surface, (75, 88, 61),
                                      (bx - 8, node_y), (bx + 9, node_y), 2)
@@ -231,6 +253,10 @@ class PaperRenderer:
                                      node_y - 36, 39, 38),
                                     .15 if direction > 0 else 1.4,
                                     1.7 if direction > 0 else 3.0, 2)
+                    leaf = [(bx + direction*3, node_y - 13),
+                            (bx + direction*28, node_y - 30),
+                            (bx + direction*17, node_y - 12)]
+                    pygame.draw.polygon(surface, (104, 113, 77), leaf)
         for index, x in self._scroll_positions(camera, 2460, .72, 1180):
             if -240 < x < WIDTH + 240:
                 color = (112, 52, 50)
@@ -238,6 +264,11 @@ class PaperRenderer:
                 pygame.draw.line(surface, color, (x - 78, 349), (x - 78, 520), 5)
                 pygame.draw.line(surface, color, (x + 78, 349), (x + 78, 520), 5)
                 pygame.draw.line(surface, color, (x - 126, 330), (x + 126, 330), 4)
+                pygame.draw.line(surface, (184, 126, 98),
+                                 (x - 101, 351), (x + 101, 351), 1)
+                for post_x in (x - 78, x + 78):
+                    pygame.draw.line(surface, (180, 132, 111),
+                                     (post_x + 2, 359), (post_x + 2, 512), 1)
 
     def _draw_western_backdrop(self, surface, camera):
         wash = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
@@ -253,6 +284,10 @@ class PaperRenderer:
                     (x + 455, 440)]
             pygame.draw.polygon(wash, (137, 96, 58, 38), mesa)
             pygame.draw.lines(wash, (119, 82, 54, 96), False, mesa, 2)
+            for cut in range(4):
+                yy = top + 55 + cut*22
+                pygame.draw.line(wash, (119, 82, 54, 39),
+                                 (x+100+cut*13, yy), (x+343+cut*17, yy-2), 1)
         surface.blit(wash, (0, 0))
 
         for index, x in self._scroll_positions(camera, 690, .56, 170):
@@ -262,6 +297,8 @@ class PaperRenderer:
                                 math.pi * .5, math.pi * 1.5, 4)
                 pygame.draw.arc(surface, (88, 91, 60), (x, 420, 45, 70),
                                 -math.pi * .5, math.pi * .5, 4)
+                for yy in range(386, 517, 19):
+                    pygame.draw.line(surface, (127, 123, 79), (x-5, yy), (x+4, yy-3), 1)
             else:
                 pygame.draw.line(surface, (105, 81, 58), (x, 405), (x, 535), 3)
                 pygame.draw.line(surface, (105, 81, 58), (x - 34, 433), (x + 34, 433), 2)
@@ -273,6 +310,9 @@ class PaperRenderer:
             pygame.draw.line(surface, (102, 77, 56), (x1 - 18, 398), (x1 + 18, 398), 2)
             pygame.draw.arc(surface, (114, 91, 68),
                             (x1, 392, max(1, x2 - x1), 26), 0, math.pi, 1)
+            for yy in (386, 397):
+                pygame.draw.circle(surface, (141, 127, 97), (x1-12, yy), 3, 1)
+                pygame.draw.circle(surface, (141, 127, 97), (x1+12, yy), 3, 1)
 
     def _draw_space_backdrop(self, surface, camera):
         wash = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
@@ -282,6 +322,12 @@ class PaperRenderer:
         pygame.draw.circle(wash, (72, 94, 121, 115), (planet_x, planet_y), 132, 3)
         pygame.draw.ellipse(wash, (145, 67, 69, 100),
                             (planet_x - 205, planet_y - 72, 410, 144), 2)
+        for crater_x, crater_y, radius in ((-49, -38, 17), (32, 28, 23), (70, -47, 11)):
+            pygame.draw.circle(wash, (78, 98, 119, 73),
+                               (planet_x+crater_x, planet_y+crater_y), radius, 1)
+            pygame.draw.arc(wash, (78, 98, 119, 40),
+                            (planet_x+crater_x-radius+4, planet_y+crater_y-radius+5,
+                             radius*2, radius*2), .3, 2.6, 1)
         surface.blit(wash, (0, 0))
 
         for index, x in self._scroll_positions(camera, 520, .28, 80):
@@ -302,15 +348,46 @@ class PaperRenderer:
                 pygame.draw.rect(surface, (99, 124, 145), (panel_x, y - 18, 29, 36), 2)
                 pygame.draw.line(surface, (99, 124, 145),
                                  (panel_x, y), (panel_x + 29, y), 1)
+                for column in (9, 19):
+                    pygame.draw.line(surface, (131, 153, 164),
+                                     (panel_x+column, y-16), (panel_x+column, y+16), 1)
+            pygame.draw.line(surface, (89, 102, 118), (x, y-14), (x+8, y-29), 1)
+            pygame.draw.circle(surface, (153, 67, 64), (x+8, y-29), 2)
+            pygame.draw.line(surface, (152, 170, 174), (x-17, y-10), (x+15, y-10), 1)
             label = f"SAT-{abs(index) % 97:02d}"
             self.doodle_text(surface, label, (x - 32, y + 25),
                              (104, 121, 138), self.font_small, -1)
 
     def doodle_text(self, surface, text, pos, color=INK, font=None, angle=0):
+        from localization import translate
+        text = translate(str(text))
         img = (font or self.font).render(text, True, color)
         if angle:
             img = pygame.transform.rotate(img, angle)
         surface.blit(img, pos)
+
+    def wrapped_text(self, surface, text, pos, max_width, color=INK, font=None,
+                     line_spacing=4):
+        """Translate a complete phrase before wrapping, retaining word context."""
+        from localization import translate
+        text = translate(str(text))
+        face = font or self.font
+        lines = []
+        for paragraph in text.split("\n"):
+            line = ""
+            for word in paragraph.split():
+                candidate = f"{line} {word}".strip()
+                if line and face.size(candidate)[0] > max_width:
+                    lines.append(line)
+                    line = word
+                else:
+                    line = candidate
+            lines.append(line)
+        x, y = pos
+        for line in lines:
+            surface.blit(face.render(line, True, color), (x, y))
+            y += face.get_linesize() + line_spacing
+        return y
 
     def draw_coffee_stain(self, surface, camera, rect: pygame.Rect, time: float):
         sx = camera.screen_x(rect.x)

@@ -45,6 +45,7 @@ SFX_VARIANT_COUNTS = {
     "blade": 3, "katana_cut": 3, "pistol": 4, "shotgun": 3,
     "cannon": 3, "rubber": 3, "hit": 4, "heavy_hit": 3,
     "enemy_break": 4, "blocked": 3, "ink": 3, "paper_step": 3,
+    "reload": 3,
     "staple": 3, "snip": 3, "ink_burst": 3,
     "bowie_cut": 3, "ion_slice": 3, "field_knife": 3,
     "revolver": 4, "suppressed_shot": 4, "double_barrel": 3,
@@ -173,7 +174,8 @@ class NotebookComposer:
             age = (index - begin) / self.sample_rate
             t = age / max(.001, duration)
             white = rng.uniform(-1.0, 1.0)
-            smooth += (white - smooth) * (.08 if texture == "room" else .32)
+            smoothing = .08 if texture == "room" else .18 if texture == "grain" else .32
+            smooth += (white - smooth) * smoothing
             high = white - previous
             previous = white
             if texture == "scratch":
@@ -190,6 +192,11 @@ class NotebookComposer:
             elif texture == "room":
                 sample = smooth
                 envelope = .75 + .25 * math.sin(TAU * .11 * age + seed)
+            elif texture == "grain":
+                # A blunt graphite mark on layered paper: more body than hiss.
+                # Short attacks retain impact timing without a brittle white-noise snap.
+                sample = smooth * .86 + white * .12 + high * .035
+                envelope = min(1.0, age / .002) * (1.0 - t) ** 1.55
             else:
                 sample = white * .58 + smooth * .42
                 envelope = math.sin(math.pi * min(1, t)) ** .48
@@ -417,8 +424,8 @@ class NotebookComposer:
     def sfx(self, name: str, variation: int = 0) -> array:
         """Render one deterministic take of a cue.
 
-        ``variation=0`` preserves the original canonical render. Alternate
-        takes change oscillator pitch, material noise and tiny layer timings;
+        ``variation=0`` is the canonical render. Alternate takes change
+        oscillator pitch, material noise and tiny layer timings;
         they never depend on global random state.
         """
         specs = {
@@ -427,7 +434,7 @@ class NotebookComposer:
             "page": (.62, "page", 120),
             "fold": (.48, "paper", 180),
             "tear": (.34, "tear", 145),
-            "paper_step": (.08, "tap", 520),
+            "paper_step": (.08, "paper_step", 520),
             "ink": (.17, "ink", 185),
             "doodle": (.13, "pencil", 720),
             "dash": (.13, "swish", 670),
@@ -439,7 +446,7 @@ class NotebookComposer:
             "cannon": (.30, "heavy", 58),
             "rubber": (.15, "rubber", 910),
             "brush": (.26, "brush", 170),
-            "reload": (.18, "cap", 460),
+            "reload": (.26, "reload", 460),
             "pickup": (.42, "pickup", 740),
             "paper_break": (.38, "tear", 92),
             "redraw": (.82, "redraw", 1040),
@@ -515,6 +522,21 @@ class NotebookComposer:
             self._add_noise(target, .01, duration, .20, seed, "rub")
         elif kind in ("snap", "tap", "cap"):
             self._add_impact(target, 0, frequency, .24, duration, seed)
+        elif kind == "paper_step":
+            self._add_note(target, 0, .057, frequency * .45, .10, "bass")
+            self._add_noise(target, .002, .068, .19, seed, "grain")
+        elif kind == "hit":
+            self._add_note(target, 0, .075, frequency, .24, "bass")
+            self._add_noise(target, .002, .071, .34, seed, "grain")
+            self._add_note(target, .009, .051, frequency * .63, .07, "pencil")
+        elif kind == "reload":
+            # Cap pull, a short pause, then a firm reseat. Two small gestures
+            # make readying a marker distinct from a hit or an empty trigger.
+            self._add_noise(target, 0, .068, .28, seed, "grain")
+            self._add_note(target, .005, .060, frequency * .58, .15, "pencil")
+            self._add_noise(target, .125, .085, .32, seed + 1, "grain")
+            self._add_note(target, .129, .084, frequency, .20, "pencil")
+            self._add_note(target, .143, .069, frequency * .43, .09, "bass")
         elif kind == "swish":
             self._add_noise(target, 0, duration, .29, seed, "tear")
             for index in range(len(target)):
@@ -547,8 +569,12 @@ class NotebookComposer:
             self._add_note(target, .03, duration, 1046, .12, "toy")
             self._add_noise(target, .04, .22, .13, seed + 1, "scratch")
         elif kind == "blocked":
-            self._add_impact(target, 0, frequency, .25, .12, seed)
-            self._add_note(target, .015, .13, frequency * 2.34, .12, "toy")
+            # A dry catch and rebound. No metallic reward-like ring: this cue
+            # must say the stroke stopped before doing damage.
+            self._add_noise(target, 0, .073, .34, seed, "grain")
+            self._add_note(target, .003, .073, frequency * .68, .22, "pencil")
+            self._add_noise(target, .057, .060, .20, seed + 1, "grain")
+            self._add_note(target, .061, .065, frequency * .39, .10, "bass")
         elif kind == "arena_lock":
             self._add_impact(target, 0, frequency, .30, .26, seed)
             self._add_impact(target, .12, frequency * .82, .24, .24, seed + 1)

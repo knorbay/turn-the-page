@@ -18,6 +18,8 @@ from paper_puzzles import CarbonTransferPuzzle, CreaseWeavePuzzle
 from puzzles import GlyphLockPuzzle, InkCircuitPuzzle
 from route_puzzles import (DraftBridgePuzzle, PerforatedPosterPuzzle,
                            SatelliteRelayPuzzle)
+from action_content import WeaponPickup
+from major_update import PracticeDrawing
 from save_system import SaveSystem
 from settings import HEIGHT, WIDTH
 
@@ -234,6 +236,7 @@ class PaperStoryTests(unittest.TestCase):
         visited = [0]
         cleared = set()
         solved_paper = set()
+        training_finished_at = None
 
         def circuit_move(state, target):
             queue = deque([(tuple(state), [])])
@@ -283,7 +286,17 @@ class PaperStoryTests(unittest.TestCase):
             aim_point = None
             arena = next((entity for entity in game.level.entities.items
                           if isinstance(entity, CombatArena) and entity.encounter_active and not entity.completed), None)
-            if arena:
+            training = getattr(game.level.runtime, "training", None)
+            route_x = getattr(game.level.runtime, "pacing_map", lambda value: value)
+            training_active = training is not None and not training.completed
+            if training_active:
+                from tools.training_pilot import lesson_input
+                lesson_frame = lesson_input(game)
+                left, right, interact = lesson_frame.left, lesson_frame.right, lesson_frame.interact
+                attack, jump, dash = lesson_frame.attack_pressed, lesson_frame.jump_pressed, lesson_frame.dash_pressed
+                if lesson_frame.aim_x is not None:
+                    aim_point = (lesson_frame.aim_x, lesson_frame.aim_y)
+            elif arena:
                 if arena.enemies:
                     ranged_kinds = {"doodle_turret","redaction_agent","ink_outlaw",
                                     "cactus_gunner","rake_cactus","gutter_lantern",
@@ -326,16 +339,21 @@ class PaperStoryTests(unittest.TestCase):
                     # Finish the last scratch with the fast blade instead of
                     # standing over an erased floor for a full cannon reload.
                     # This also exercises mid-fight weapon switching.
-                    if kind == "eraser_brute" and target.hp <= 1:
+                    if (kind == "eraser_brute" and target.hp <= 1
+                            and "marker_shotgun" in game.weapons.available_ids):
                         preferred = "marker_shotgun"
                     available = game.weapons.available_ids
                     if kind == "lantern_yokai" and "rubber_band" in available:
                         preferred="rubber_band"
                     if preferred not in available:
-                        preferred = next((weapon for weapon in ("ink_pistol","rubber_band","marker_shotgun","pencil_blade")
-                                          if weapon in available),"pencil_blade")
+                        preferred = next((weapon for weapon in (
+                            "ink_pistol", "rubber_band", "marker_shotgun", "pencil_blade",
+                            "folded_shuriken", "margin_maul", "carbon_lance", "chalk_bomb")
+                            if weapon in available), "unarmed")
                     if kind == "baby_face_giant" and "excalibur" in available:
                         preferred = "excalibur"
+                    flank_guard = (kind == "ruler_guard" and
+                                   preferred in ("ink_pistol", "marker_shotgun", "carbon_lance", "folded_shuriken"))
                     weapon_slot = list(game.weapons.weapons).index(preferred)
                     desired_range = (
                         205 if kind in ("artist_mistake", "orbital_mistake",
@@ -351,22 +369,61 @@ class PaperStoryTests(unittest.TestCase):
                     )
                     if not getattr(target,"is_boss",False):
                         desired_range={"ink_pistol":220,"rubber_band":205,
-                                       "marker_shotgun":155,"eraser_cannon":190}.get(preferred,45)
+                                       "marker_shotgun":155,"eraser_cannon":190,
+                                       "folded_shuriken":90, "margin_maul":80,
+                                       "carbon_lance":230, "chalk_bomb":190}.get(preferred,45)
                     if kind == "wanted_sketch":
                         desired_range=220
+                    if kind == "scissor_director":
+                        desired_range=190
                     if kind == "eraser_brute" and target.state == "idle":
                         desired_range=88  # Step into its advertised slam trigger, then leave.
                     if preferred in ("pencil_blade", "excalibur"):
                         desired_range = 62 if preferred == "excalibur" else 45
+                    if flank_guard:
+                        # The visible ruler shield keeps rejecting frontal
+                        # pistol shots even during recovery. Bait its fixed
+                        # facing at close range, then cross to the open back.
+                        desired_range = 85
+                    drawing = (getattr(target, "notebook_reveal", 1) < 1 or
+                               getattr(target, "notebook_activation_blocked", False))
+                    if drawing:
+                        # Leave room for the visible pencil outline to become
+                        # an actor. Standing inside it correctly delays its
+                        # activation; it is not an invulnerable live enemy.
+                        desired_range = max(desired_range,
+                                            (target.rect.width+player.rect.width)/2+40)
                     if abs(distance) > desired_range + 22:
                         left, right = distance < 0, distance > 0
                     elif abs(distance) < desired_range - 22:
                         left, right = distance > 0, distance < 0
                     attack = True
+                    shot_blocked = False
+                    if preferred in ('ink_pistol', 'marker_shotgun', 'carbon_lance', 'eraser_cannon'):
+                        # An elevated firing position can have its own real
+                        # paper ledge between the muzzle and a lower target.
+                        # Read the obstruction, then jump or drop through it.
+                        padding = 26 if preferred == 'eraser_cannon' else 6
+                        shot_blocked = any(solid.inflate(padding, padding).clipline(
+                            (player.center_x, player.rect.centery-5), aim_point)
+                            for solid in game.level.world.collision_rects())
+                        attack = not shot_blocked
                     if kind in ("eraser_brute","crumpled_one","scissor_director"):
                         # Read the exposed soft side instead of emptying the
                         # slow cannon into armour and reloading its opening.
                         attack = target.vulnerable
+                    if kind == "final_editor":
+                        # The last room's real raised ink blocks a large
+                        # cannon shot from the floor. Read that firing line,
+                        # jump to its upper angle, and keep the magazine for
+                        # the visibly exposed proof window.
+                        if preferred == "eraser_cannon":
+                            shot_blocked = any(solid.inflate(26, 26).clipline(
+                                (player.center_x, player.rect.centery-5), aim_point)
+                                for solid in game.level.world.collision_rects())
+                        attack = target.vulnerable and not shot_blocked
+                    if flank_guard and preferred != "folded_shuriken":
+                        attack = (player.center_x-target.x)*target.facing < -2
                     danger_states = {
                         "telegraph", "brace", "aim", "dive_telegraph", "slam_telegraph",
                         "charge_telegraph", "sweep_telegraph", "snap_telegraph",
@@ -376,6 +433,8 @@ class PaperStoryTests(unittest.TestCase):
                         "flare", "prickle", "tail_warn", "ram_warn", "agent_aim", "cut_warn", "drop_warn",
                         "bounty_draw", "rail_whistle", "return_whistle", "return_telegraph", "cross_warn", "staple_columns_warn",
                         "moon_release_warn", "meteor_warn",
+                        "needle_thrust_warn", "staple_cross_warn", "comet_corridor_warn",
+                        "binding_warn", "carbon_warn",
                     }
                     ranged_windups = {"aim","scan","flare","quickdraw","lock","agent_aim","bounty_draw"}
                     threats = [enemy for enemy in arena.enemies if enemy.state in danger_states
@@ -401,6 +460,7 @@ class PaperStoryTests(unittest.TestCase):
                         "echo_slash", "draw_cut", "pounce", "roll", "ram", "comet_dash",
                         "counter_cut", "red_stamp", "shear", "drop",
                         "rail_rush", "meteor_fall",
+                        "needle_thrust", "binding_snap",
                     }
                     committed = min(
                         (enemy for enemy in arena.enemies
@@ -417,6 +477,14 @@ class PaperStoryTests(unittest.TestCase):
                             # into the wall.
                             dash = True
                             left, right = committed_distance < 0, committed_distance > 0
+                    if flank_guard and target.state == "brace":
+                        # Hold the baited distance while the BACK annotation
+                        # is shown; leaving early spends the whole dodge
+                        # before the thrust and never reaches the flank.
+                        left = right = False
+                        if target.state_time <= .14 and player.dash_ready:
+                            dash = True
+                            left, right = distance < 0, distance > 0
                     meteor = next((e for e in arena.enemies if e.state in
                                    ("meteor_warn", "meteor_fall")),None)
                     if meteor is not None and abs(player.center_x-meteor.meteor_x)<150:
@@ -443,6 +511,7 @@ class PaperStoryTests(unittest.TestCase):
                 for enemy in arena.enemies:
                     for shot in getattr(enemy,"projectiles",()):
                         if getattr(shot,"life",0)<=0:continue
+                        if not getattr(shot,"damage_enabled",True):continue
                         horizon=.16
                         start=(shot.x,shot.y)
                         end=(shot.x+shot.vx*horizon,
@@ -455,13 +524,15 @@ class PaperStoryTests(unittest.TestCase):
                     dash=True
                     left,right=shot.vx>0,shot.vx<0
                 jump = player.on_ground and (
-                    not arena.enemies or bool(incoming) or
-                    (preferred in ("pencil_blade","excalibur") and
+                    not arena.enemies or bool(incoming) or shot_blocked or
+                    (preferred in ("pencil_blade", "excalibur", "margin_maul", "folded_shuriken") and
                      target.rect.bottom<player.rect.bottom-40) or
                     any(e.state in ("shear", "rail_rush") and abs(e.x-player.center_x)<300 for e in arena.enemies) or
                     any(e.state == "cut_warn" and e.state_time < .22 and
                         abs(e.x-player.center_x)<180 for e in arena.enemies) or
                     any(e.state in ("rail_whistle", "return_whistle") and e.state_time < .22 for e in arena.enemies) or
+                    any(e.state == "binding_snap" and e._binding_rect().colliderect(player.rect)
+                        for e in arena.enemies) or
                     any(enemy.state in ("telegraph", "slam_telegraph", "sweep_telegraph", "return_telegraph")
                         or (enemy.kind in ("eraser_brute", "carbon_stamper") and
                             (enemy.state in ("slam", "recover")
@@ -471,6 +542,23 @@ class PaperStoryTests(unittest.TestCase):
                              or bool(getattr(enemy, "_temporary_erases", ()))))
                         for enemy in arena.enemies)
                 )
+                comet = next((e for e in arena.enemies if e.state in
+                              ("comet_corridor_warn", "comet_corridor")), None)
+                if comet is not None:
+                    gap_center = sum(comet.safe_corridor)/2
+                    left, right = player.center_x > gap_center+25, player.center_x < gap_center-25
+                    jump = dash = attack = False
+                editor = next((e for e in arena.enemies if e.kind == "final_editor"), None)
+                if editor is not None and editor.state in ("pattern_telegraph", "redaction_wall") and editor.pattern == "redaction_wall":
+                    clean_center = sum(editor.safe_margin)/2
+                    left, right = player.center_x > clean_center+20, player.center_x < clean_center-20
+                    jump = dash = attack = False
+                if editor is not None and editor.state in ("pattern_telegraph", "erase_columns") and editor.pattern == "erase_columns":
+                    marks = [arena.start_x+35, *editor.erase_lanes, arena.end_x-35]
+                    gaps = [(a+b)/2 for a,b in zip(marks, marks[1:]) if b-a>70]
+                    destination = min(gaps, key=lambda x:abs(x-player.center_x))
+                    left, right = player.center_x > destination+15, player.center_x < destination-15
+                    jump = dash = attack = False
             else:
                 draft = next((entity for entity in game.level.entities.items
                               if isinstance(entity, DraftBridgePuzzle) and not entity.completed
@@ -521,17 +609,24 @@ class PaperStoryTests(unittest.TestCase):
                             if isinstance(puzzle, CreaseWeavePuzzle):
                                 jump = player.on_ground and abs(distance) > 24
                     else:
-                        wait = ((chapter == 2 and 5600 < player.x < 5740 and
+                        wait = ((chapter == 2 and route_x(5600) < player.x < route_x(5740) and
                                  "blot_on_switch" not in game.level.flags))
                         right = not wait
                         interact = chapter == 3 and (
-                            (1050 < player.x < 1220 and game.level.world.active_layer == 0) or
-                            (3880 < player.x < 4100 and game.level.world.active_layer == 1)
+                            (route_x(1050) < player.x < route_x(1220) and game.level.world.active_layer == 0) or
+                            (route_x(3880) < player.x < route_x(4100) and game.level.world.active_layer == 1)
                         )
-                        zones = list(ROUTE_JUMPS[chapter])
+                        zones = [(route_x(a), route_x(b)) for a, b in ROUTE_JUMPS[chapter]]
                         zones.extend((platform.x1 - 150, platform.x1 - 25)
                                      for platform in game.level.world.platforms
-                                     if platform.name.startswith("room_"))
+                                     if platform.name.startswith(("room_", "expedition_obstacle_")))
+                        # Read the newly authored working lines. The older
+                        # pilot treated every quiet page stretch as a flat
+                        # corridor and deliberately never jumped here.
+                        zones.extend((platform.x1 - 80, platform.x1 - 12)
+                                     for platform in game.level.world.platforms
+                                     if platform.name.startswith("quality_route_")
+                                     or platform.name == "quality_underfold_proof")
                         zones.extend((flap.x1 - 150, flap.x1 - 25)
                                      for entity in game.level.entities.items
                                      if isinstance(entity, CreaseWeavePuzzle)
@@ -541,6 +636,11 @@ class PaperStoryTests(unittest.TestCase):
                         jump = player.on_ground and (
                             any(a < player.x < b for a, b in zones)
                             or (right and abs(player.vx) < 8)
+                            or (right and player.rect.bottom >= 615 and any(
+                                p.name.startswith(("quality_catch_", "quality_underfold_"))
+                                and p.x1 <= player.center_x <= p.x2
+                                and abs(p.y-player.rect.bottom)<3
+                                for p in game.level.world.platforms))
                         )
             if not arena:
                 poster = next((entity for entity in game.level.entities.items
@@ -584,17 +684,17 @@ class PaperStoryTests(unittest.TestCase):
                         interact = abs(distance) <= 12
                     elif player.on_ground and abs(player.rect.bottom - 500) <= 4:
                         right = center < relay.receiver[0] - 5
-                        jump = center >= 9480
+                        jump = center >= route_x(9480)
                     elif player.on_ground and player.rect.bottom >= 550:
                         right = center < relay.receiver[0] - 5
-                        jump = center >= 9255
+                        jump = center >= route_x(9255)
                     else:
                         right = center < relay.receiver[0] - 5
             # Deliberately leave a high landing to use a short blade on the floor.
             down = bool(arena and arena.enemies and player.on_ground
                         and target.y-player.rect.bottom > 50
                         and (preferred in ('pencil_blade','excalibur')
-                             or target.kind=='orbital_mistake'))
+                             or target.kind=='orbital_mistake' or shot_blocked))
             if down: jump = True
             before = game.level.respawn_timer
             game.update(1 / 60, InputFrame(left=left, right=right, jump_pressed=jump,
@@ -608,6 +708,16 @@ class PaperStoryTests(unittest.TestCase):
                                            dash_pressed=dash, weapon_slot=weapon_slot,
                                            aim_x=aim_point[0] if aim_point else None,
                                            aim_y=aim_point[1] if aim_point else None))
+            if training is not None and training.completed and training_finished_at is None:
+                training_finished_at = game.session_seconds
+            if os.environ.get("PAPER_STORY_ROUTE_METRICS") and frame_index % (60*30) == 0:
+                print("route", round(game.session_seconds,1), chapter, round(player.x),
+                      game.level.current_checkpoint, player.health,
+                      (round(player.y), game.weapons.current_id, game.weapons.current.ammo),
+                      [(e.kind, round(e.hp,1), e.state, round(e.x), round(e.y)) for e in getattr(arena,"enemies",())],
+                      (training.stage, round(training.elapsed,1), training.jumps,
+                       training.dashes, training.practice_done, training.read_seal)
+                      if training_active else "lesson_complete", flush=True)
             if before == 0 and game.level.respawn_timer > 0:
                 falls += 1
                 fall_log.append((chapter, round(player.x), round(player.y),
@@ -617,6 +727,8 @@ class PaperStoryTests(unittest.TestCase):
                                  [(platform.name, list(platform.erased))
                                   for platform in game.level.world.platforms
                                   if platform.erased]))
+                if os.environ.get("PAPER_STORY_ROUTE_METRICS"):
+                    print("route_respawn", fall_log[-1], flush=True)
             for entity in game.level.entities.items:
                 if isinstance(entity, CombatArena) and entity.completed:
                     cleared.add(entity.arena_id)
@@ -641,8 +753,16 @@ class PaperStoryTests(unittest.TestCase):
                            if getattr(entity, "mandatory", False) and
                            not getattr(entity, "completed", False)]))
         self.assertEqual(visited, [0, 1, 2, 3, 4])
+        self.assertIsNotNone(training_finished_at)
+        self.assertGreaterEqual(training_finished_at, 60)
+        self.assertEqual(game.behavior.count("practice_complete"), 4)
+        self.assertTrue(game.save.data["tutorial"]["completed"])
+        self.assertGreaterEqual(game.save.data["tutorial"]["jumps"], 3)
+        self.assertGreaterEqual(game.save.data["tutorial"]["dashes"], 3)
         # The Baby interlude deliberately contributes two authored deaths.
         self.assertLessEqual(falls, 20, fall_log)
+        self.assertEqual(sum(any(enemy[0] == "baby_face_giant" for enemy in entry[5])
+                             for entry in fall_log), 2)
         required = {arena_id for ids in REQUIRED_SLICE_ENCOUNTERS.values() for arena_id in ids}
         self.assertEqual(cleared, required)
         self.assertEqual(solved_paper, {"first_page_draft", "wanted_perforation",

@@ -4,7 +4,7 @@ import math
 import pygame
 
 from settings import GRAVITY, INK, MAX_FALL
-from page_arsenal import draw_weapon, profile_for
+from page_arsenal import draw_weapon, profile_for, held_weapon_pose
 
 
 class Player:
@@ -19,6 +19,7 @@ class Player:
         self.on_ground = False
         self.coyote = 0.0
         self.jump_buffer = 0.0
+        self._buffered_jump_released = False
         self.facing = 1
         self.anim_time = 0.0
         self.land_squash = 0.0
@@ -41,7 +42,7 @@ class Player:
         self.dash_cooldown = 0.0
         self.dash_direction = 1
         self.return_used = False
-        self.current_weapon = "pencil_blade"
+        self.current_weapon = "unarmed"
         self.aim_angle = 0.0
         self.weapon_recoil = 0.0
         self.weapon_reload_progress = None
@@ -104,9 +105,14 @@ class Player:
 
     def queue_jump(self):
         self.jump_buffer = .12
+        self._buffered_jump_released = False
 
     def release_jump(self):
         # Variable height without making tap-jumps feel anaemic.
+        # A fast tap can release before a buffered jump actually launches.
+        # Retain that release so hit-stop/landing cannot turn it into a hold.
+        if self.jump_buffer > 0:
+            self._buffered_jump_released = True
         if self.vy < -245:
             self.vy *= .48
 
@@ -270,9 +276,12 @@ class Player:
         if self.jump_buffer > 0 and self.coyote > 0 and not self.locked:
             jump_speed = 650.0 if self.material != "sticky" else 535.0
             self.vy = -jump_speed
+            if self._buffered_jump_released:
+                self.vy *= .48
             self.on_ground = False
             self.coyote = 0.0
             self.jump_buffer = 0.0
+            self._buffered_jump_released = False
             self.land_squash = -.12
             particles.paper_puff(self.center_x, self.y + self.HEIGHT, 5)
 
@@ -376,7 +385,7 @@ class Player:
             if self.on_ground:
                 legs = [((cx+facing*8, hip_y+8), (cx+facing*stance, bottom)),
                         ((cx-facing*8, hip_y+7), (cx-facing*(stance-3), bottom))]
-        elif self.draw_amount >= 1 and self.current_weapon not in ("pencil_blade", "margin_maul"):
+        elif self.draw_amount >= 1 and self.current_weapon not in ("unarmed", "pencil_blade", "margin_maul"):
             shape = profile_for(getattr(self, "arsenal_page", None), self.current_weapon).silhouette
             heavy = shape in ("marker", "double_barrel", "breach", "eraser", "null_cannon", "carbon_rifle")
             if self.weapon_reload_progress is not None:
@@ -507,7 +516,9 @@ class Player:
                                     head_r * 2, head_r * 2)
             if head_progress >= 1:
                 from sketch_marks import rough_circle
-                rough_circle(surface, ink, (head_x,head_y),head_r,441,2,2,wobble=1.6)
+                pygame.draw.circle(surface, (246, 237, 215),
+                                   (round(head_x), round(head_y)), head_r)
+                rough_circle(surface, ink, (head_x,head_y),head_r,441,2,2,wobble=1.1)
             else:
                 pygame.draw.arc(surface, ink, head_rect, -math.pi / 2,
                                 -math.pi / 2 + math.tau * head_progress, 2)
@@ -527,7 +538,8 @@ class Player:
             look_y = -2 if self.look_target and self.look_target[1] < self.y else 1
             pygame.draw.line(surface, ink, (round(head_x + self.facing * 3), round(head_y + look_y)),
                              (round(head_x + self.facing * 6), round(head_y + look_y)), 1)
-        self._draw_page_costume(surface, head_x, head_y, shoulder_y, hip_y, ink)
+        self._draw_page_costume(surface, head_x, head_y, shoulder_y, hip_y, ink,
+                                shoulder_x, hip_x)
         if self.combat_swing is not None and self.draw_amount >= .8:
             self._draw_melee_motion(surface, camera, cx)
         elif self.attack_timer > 0 and self.draw_amount >= .8:
@@ -706,10 +718,31 @@ class Player:
                         (bent_hip[0] + length, bent_shoulder[1] - 16),
                         2, 471, 2, 1.8)
 
-    def _draw_page_costume(self, surface, head_x, head_y, shoulder_y, hip_y, ink):
+    def _draw_page_costume(self, surface, head_x, head_y, shoulder_y, hip_y, ink,
+                           shoulder_x=None, hip_x=None):
         if self.draw_amount < .82:
             return
+        # Headgear follows the head; cloth follows the articulated torso.
+        # Using head_x for both made coats float sideways during a lean.
+        shoulder_x = head_x if shoulder_x is None else shoulder_x
+        hip_x = shoulder_x if hip_x is None else hip_x
+        def torso(offset, y):
+            t = (y-shoulder_y)/max(1.0, hip_y-shoulder_y)
+            return (round(shoulder_x+(hip_x-shoulder_x)*t+offset), round(y))
+
         if self.page_style == "ronin":
+            haori = [torso(-10, shoulder_y+1),
+                     torso(-14, hip_y+2),
+                     torso(-3, hip_y-1),
+                     torso(0, shoulder_y+5),
+                     torso(3, hip_y-1),
+                     torso(14, hip_y+2),
+                     torso(10, shoulder_y+1)]
+            pygame.draw.polygon(surface, (109, 114, 99), haori)
+            pygame.draw.lines(surface, ink, True, haori, 1)
+            pygame.draw.line(surface, (203, 196, 167),
+                             torso(-8, shoulder_y+3),
+                             torso(-10, hip_y-2), 1)
             # Small top-knot, head band and open haori.  The weapon remains a
             # separate page tool, so losing it at the page turn still reads.
             pygame.draw.circle(surface, ink, (round(head_x - self.facing * 4),
@@ -725,40 +758,79 @@ class Player:
                     [(bx,by),(bx-self.facing*10,round(by+dy+flutter)),
                      (bx-self.facing*23,round(by+dy+3-flutter))],2)
             pygame.draw.line(surface, ink,
-                             (round(head_x - 10), round(shoulder_y + 1)),
-                             (round(head_x - 14), round(hip_y + 1)), 2)
+                             torso(- 10, shoulder_y + 1),
+                             torso(- 14, hip_y + 1), 2)
             pygame.draw.line(surface, ink,
-                             (round(head_x + 10), round(shoulder_y + 1)),
-                             (round(head_x + 14), round(hip_y + 1)), 2)
+                             torso(10, shoulder_y + 1),
+                             torso(14, hip_y + 1), 2)
             pygame.draw.line(surface, (142, 55, 55),
-                             (round(head_x - 12), round(shoulder_y + 8)),
-                             (round(head_x + 12), round(shoulder_y + 8)), 2)
+                             torso(- 12, shoulder_y + 8),
+                             torso(12, shoulder_y + 8), 2)
         elif self.page_style == "cowboy":
             # The requested hat deliberately dominates the tiny head.
             brim_y = round(head_y - 8)
+            hat = [(round(head_x-11), brim_y-1), (round(head_x-8), brim_y-10),
+                   (round(head_x+1), brim_y-12), (round(head_x+9), brim_y-9),
+                   (round(head_x+11), brim_y)]
+            pygame.draw.polygon(surface, (131, 96, 58), hat)
+            pygame.draw.lines(surface, ink, False, hat, 2)
+            pygame.draw.line(surface, (202, 163, 104),
+                             (round(head_x-6), brim_y-9), (round(head_x+5), brim_y-10), 1)
+            vest = [torso(-8, shoulder_y+3),
+                    torso(-10, hip_y-4),
+                    torso(9, hip_y-4),
+                    torso(7, shoulder_y+3)]
+            pygame.draw.polygon(surface, (183, 141, 91), vest)
+            pygame.draw.lines(surface, ink, True, vest, 1)
+            pygame.draw.line(surface, ink, torso(0, shoulder_y+7),
+                             torso(0, hip_y-4), 1)
             pygame.draw.line(surface, ink, (round(head_x - 16), brim_y),
                              (round(head_x + 16), brim_y), 4)
             pygame.draw.arc(surface, ink,
                             (round(head_x - 10), round(head_y - 20), 20, 15),
                             math.pi, math.tau, 3)
             pygame.draw.line(surface, (147, 58, 54),
-                             (round(head_x - 8), round(shoulder_y + 2)),
-                             (round(head_x + 7), round(shoulder_y + 7)), 3)
+                             torso(- 8, shoulder_y + 2),
+                             torso(7, shoulder_y + 7), 3)
             pygame.draw.line(surface, ink,
-                             (round(head_x - 12), round(hip_y - 3)),
-                             (round(head_x + 12), round(hip_y - 3)), 2)
+                             torso(- 12, hip_y - 3),
+                             torso(12, hip_y - 3), 2)
         elif self.page_style == "astronaut":
+            suit = [torso(-7, shoulder_y),
+                    torso(-10, hip_y),
+                    torso(9, hip_y),
+                    torso(7, shoulder_y)]
+            pygame.draw.polygon(surface, (220, 225, 217), suit)
+            pygame.draw.lines(surface, ink, True, suit, 1)
+            visor = pygame.Rect(round(head_x-8), round(head_y-6), 17, 10)
+            pygame.draw.ellipse(surface, (67, 93, 110), visor)
+            pygame.draw.line(surface, (208, 228, 224),
+                             (round(head_x-5), round(head_y-4)),
+                             (round(head_x+1), round(head_y-4)), 1)
             pygame.draw.circle(surface, (82, 104, 129),
                                (round(head_x), round(head_y)), 12, 2)
             pygame.draw.arc(surface, (142, 65, 67),
                             (round(head_x - 9), round(head_y - 8), 18, 14),
                             .1, math.pi - .1, 2)
-            pygame.draw.rect(surface, (82, 104, 129),
-                             (round(head_x - self.facing * 13), round(shoulder_y), 7, 19), 2)
+            pack = [torso(-self.facing*13, shoulder_y),
+                    torso(-self.facing*13+7, shoulder_y),
+                    torso(-self.facing*13+7, shoulder_y+19),
+                    torso(-self.facing*13, shoulder_y+19)]
+            pygame.draw.lines(surface, (82, 104, 129), True, pack, 2)
             pygame.draw.circle(surface, (142, 65, 67),
-                               (round(head_x + 5), round(shoulder_y + 8)), 2)
+                               torso(5, shoulder_y + 8), 2)
         elif self.page_style == "ink_agent":
             # The Artist's cheap disguise: two heavy marker lenses and a tie.
+            coat = [torso(-8, shoulder_y+1),
+                    torso(-12, hip_y+3),
+                    torso(11, hip_y+3),
+                    torso(8, shoulder_y+1)]
+            pygame.draw.polygon(surface, (85, 92, 86), coat)
+            pygame.draw.lines(surface, ink, True, coat, 1)
+            pygame.draw.lines(surface, (221, 214, 190), False,
+                              [torso(-4, shoulder_y+3),
+                               torso(0, shoulder_y+11),
+                               torso(4, shoulder_y+3)], 1)
             lens_y = round(head_y - 1)
             pygame.draw.line(surface, (29, 30, 36),
                              (round(head_x - 7), lens_y), (round(head_x + 7), lens_y), 3)
@@ -766,11 +838,11 @@ class Player:
                              (round(head_x - 7), lens_y - 3, 6, 5), 1)
             pygame.draw.rect(surface, (29, 30, 36),
                              (round(head_x + 1), lens_y - 3, 6, 5), 1)
-            pygame.draw.polygon(surface, (64, 55, 64),
-                                [(round(head_x), round(shoulder_y + 4)),
-                                 (round(head_x - 3), round(shoulder_y + 12)),
-                                 (round(head_x), round(hip_y - 2)),
-                                 (round(head_x + 3), round(shoulder_y + 12))], 1)
+            pygame.draw.polygon(surface, (146, 63, 62),
+                                [torso(0, shoulder_y + 4),
+                                 torso(- 3, shoulder_y + 12),
+                                 torso(0, hip_y - 2),
+                                 torso(3, shoulder_y + 12)])
         elif self.page_style == "bad_drawing":
             # Visible correction marks make the bad anatomy intentional.
             red = (149, 60, 61)
@@ -782,120 +854,66 @@ class Player:
                              (round(head_x + 22), round(head_y - 13)), 1)
         elif self.page_style == "underpage":
             pygame.draw.line(surface, (125, 126, 133),
-                             (round(head_x - 5), round(hip_y + 3)),
-                             (round(head_x + 5), round(shoulder_y - 2)), 1)
+                             torso(- 5, hip_y + 3),
+                             torso(5, shoulder_y - 2), 1)
+
+    def weapon_attachment(self, aim_angle=None):
+        """Shared world-space grip and barrel; rendering adds only the camera."""
+        return held_weapon_pose(self, aim_angle=aim_angle)
 
     def _draw_weapon_and_hands(self, surface, cx, shoulder_y, hip_y, ink, combat_y,
                                combat_x=None):
-        """Small grips keep the stick-figure hands readable during combat."""
-        if self.current_weapon in ("pencil_blade", "margin_maul") and self.combat_swing is not None:
-            angle, reach, power = self.combat_swing
-            vector=pygame.Vector2(math.cos(angle),math.sin(angle))
-            normal=pygame.Vector2(-vector.y,vector.x)
-            origin=pygame.Vector2(cx if combat_x is None else combat_x,combat_y)
-            hand=origin+vector*13
-            page = getattr(self, "arsenal_page", None)
-            shape = profile_for(page, self.current_weapon).silhouette
-            close_grip = shape in ("bowie", "field_knife")
-            elbow=pygame.Vector2(cx+self.facing*(5 if close_grip else -3),shoulder_y+17)
-            pygame.draw.lines(surface,ink,False,[(cx,shoulder_y+7),elbow,hand],2)
-            support = (pygame.Vector2(cx-self.facing*4, shoulder_y+10) if close_grip else
-                       pygame.Vector2(cx-self.facing*10, shoulder_y+15)
-                       if shape == "redraw_pencil" else hand-vector*6+normal*2)
-            pygame.draw.lines(surface,ink,False,
-                [(cx,shoulder_y+10),(cx-self.facing*8,shoulder_y+19),support],2)
-            length = {"katana":47, "bowie":27, "field_knife":24,
-                      "ion_blade":43, "pencil":40, "redraw_pencil":44, "pencil_maul":93}.get(shape, 40)
-            draw_weapon(surface, self.current_weapon, page, hand, angle,
-                        scale=max(.55, (reach - 13) / length), ink=ink)
-            pygame.draw.circle(surface,ink,hand,3,1)
+        """Attach a sized tool to articulated wrists and a real support point."""
+        if self.current_weapon == "unarmed":
+            swing = math.sin(self.stride_phase) * 6 * self.motion_speed
+            for side in (-1, 1):
+                hand = (round(cx + side * 9 + swing * side), round(shoulder_y + 25))
+                pygame.draw.lines(surface, ink, False,
+                    [(round(cx), round(shoulder_y + 6)),
+                     (round(cx + side * 8), round(shoulder_y + 15)), hand], 2)
+                pygame.draw.circle(surface, ink, hand, 2, 1)
             return
-        weapon = self.current_weapon
+        pose = self.weapon_attachment()
+        body = self._body_pose()
+        # Screen translation is shared by wrists, weapon and barrel. The
+        # attachment itself stays in world coordinates for projectile spawning.
+        offset = pygame.Vector2(cx - body["shoulder"][0], shoulder_y - body["shoulder"][1])
+        def screen(point):
+            point = pygame.Vector2(point) + offset
+            return round(point.x), round(point.y)
+        shoulder = pygame.Vector2(body["shoulder"])
+        facing = self.facing
+        primary_start = shoulder + pygame.Vector2(0, 6)
+        support_start = shoulder + pygame.Vector2(-facing * 2, 8)
+        primary_elbow = primary_start.lerp(pose.grip, .52) + pygame.Vector2(-facing * 2, 4)
+        support_elbow = support_start.lerp(pose.support, .52) + pygame.Vector2(-facing * 4, 5)
+        pygame.draw.lines(surface, ink, False,
+                          [screen(primary_start), screen(primary_elbow), screen(pose.grip)], 2)
+        pygame.draw.lines(surface, ink, False,
+                          [screen(support_start), screen(support_elbow), screen(pose.support)], 2)
         page = getattr(self, "arsenal_page", None)
-        profile = profile_for(page, weapon)
-        shape = profile.silhouette
-        direction = self.facing
-        recoil = self.weapon_recoil
-        reloading = self.weapon_reload_progress is not None
-        idle = math.sin(self.anim_time * 3.1) * .9 if self.motion_speed < .25 else 0
-
-        if shape == "chalk_bomb":
-            hand_x, hand_y = cx + direction * 12, round(shoulder_y - 11 + idle)
-            support_x, support_y = cx - direction * 5, round(shoulder_y + 17)
-        elif shape == "fold_star":
-            hand_x, hand_y = cx + direction * 20, round(shoulder_y + 5 + idle)
-            support_x, support_y = cx - direction * 5, round(shoulder_y + 17)
-        elif shape in ("carbon_rifle", "marker", "double_barrel", "breach",
-                       "eraser", "null_cannon", "pulse"):
-            hand_x = cx + direction * (9 - recoil * 9)
-            hand_y = round(shoulder_y + 11 + math.sin(self.aim_angle) * 5 + idle)
-            support_x, support_y = hand_x + direction * 20, hand_y + 1
-        elif shape in ("revolver", "ink_pistol", "suppressed"):
-            hand_x = cx + direction * (18 - recoil * 7)
-            hand_y = round(shoulder_y + 7 + math.sin(self.aim_angle) * 7 + idle)
-            support_x, support_y = cx - direction * 5, round(shoulder_y + 19)
+        profile = profile_for(page, self.current_weapon)
+        if self.current_weapon == "ink_brush":
+            tip = pose.grip + pygame.Vector2(facing * 28, -3)
+            pygame.draw.line(surface, (94, 62, 42), screen(pose.grip), screen(tip), 3)
+            pygame.draw.circle(surface, (24, 26, 34), screen(tip), 4)
         else:
-            hand_x = cx + direction * (13 - recoil * 6)
-            hand_y = round(shoulder_y + 12 + idle)
-            support_x, support_y = cx - direction * 6, round(shoulder_y + 18)
-
-        if reloading:
-            # Lower the tool for a deliberate magazine/capsule replacement.
-            hand_x -= direction * 5
-            hand_y += 7
-            support_x = hand_x - direction * 8
-            support_y = hand_y + 13
-        shoulder = (round(cx), round(shoulder_y + 7))
-        pygame.draw.lines(surface, ink, False,
-                          [shoulder, (round(cx + direction * 5), round(shoulder_y + 12)),
-                           (round(hand_x), round(hand_y))], 2)
-        pygame.draw.lines(surface, ink, False,
-                          [(round(cx), round(shoulder_y + 10)),
-                           (round(cx - direction * 8), round(shoulder_y + 17)),
-                           (round(support_x), round(support_y))], 2)
-
-        if weapon == "ink_brush":
-            tip = (round(hand_x + direction * 45), round(hand_y - 4))
-            pygame.draw.line(surface, (94, 62, 42), (hand_x, hand_y), tip, 5)
-            pygame.draw.circle(surface, (24, 26, 34), tip, 7)
+            draw_weapon(surface, self.current_weapon, page, screen(pose.draw_origin),
+                        pose.angle, scale=pose.scale, ink=ink)
+        # Small solid wrist contacts read cleanly at1x, without the former
+        # hollow six-pixel rings looking larger than the entire forearm.
+        pygame.draw.circle(surface, (225, 207, 169), screen(pose.grip), 2)
+        pygame.draw.circle(surface, ink, screen(pose.grip), 2, 1)
+        if pose.two_handed or self.weapon_reload_progress is not None:
+            pygame.draw.circle(surface, (225, 207, 169), screen(pose.support), 2)
+            pygame.draw.circle(surface, ink, screen(pose.support), 2, 1)
         else:
-            held_angle = self.aim_angle - direction * recoil * .22
-            scale = 1.12 if shape in ("revolver", "ink_pistol", "suppressed",
-                                      "double_barrel", "breach", "marker") else 1.0
-            if shape in ("pencil", "katana", "bowie", "field_knife", "ion_blade",
-                         "redraw_pencil", "excalibur", "pencil_maul"):
-                carry = {"katana": .25, "bowie": -.28, "field_knife": 1.15,
-                         "ion_blade": -.08, "redraw_pencil": .72,
-                         "excalibur": -.88, "pencil_maul": -1.12}.get(shape, .58)
-                held_angle = carry if direction > 0 else math.pi - carry
-                if recoil > 0:
-                    held_angle -= direction * recoil * .18
-            elif shape == "fold_star":
-                held_angle = self.anim_time * 2.8
-            elif shape == "rubber":
-                held_angle = -.35 if direction > 0 else math.pi + .35
-            elif shape == "chalk_bomb":
-                held_angle = self.anim_time * .45
-            if reloading:
-                held_angle = -.85 if direction > 0 else math.pi + .85
-            draw_weapon(surface, weapon, page, (hand_x, hand_y), held_angle,
-                        scale=scale, ink=ink)
-
-        pygame.draw.circle(surface, ink, (round(hand_x), round(hand_y)), 3, 1)
-        pygame.draw.circle(surface, ink, (round(support_x), round(support_y)), 2, 1)
-        if reloading:
-            progress = self.weapon_reload_progress
-            # The second hand and displaced insert make reloading legible at
-            # the tiny player scale even without a separate sprite sheet.
-            insert_y = round(support_y + 4 + math.sin(progress * math.pi) * 5)
-            if shape == "revolver":
-                pygame.draw.circle(surface, profile.accent,
-                                   (round(support_x), insert_y), 5, 2)
-            elif shape == "chalk_bomb":
-                pygame.draw.circle(surface, profile.accent,
-                                   (round(support_x), insert_y), 5, 2)
+            pygame.draw.circle(surface, ink, screen(pose.support), 1)
+        if self.weapon_reload_progress is not None:
+            point = screen(pose.support)
+            shape = profile.silhouette
+            if shape in ("revolver", "chalk_bomb"):
+                pygame.draw.circle(surface, profile.accent, (point[0], point[1] + 3), 3, 1)
             else:
                 pygame.draw.rect(surface, profile.accent,
-                                 (round(support_x)-3, insert_y-3, 7, 9), 2)
-            pygame.draw.line(surface, ink, (round(support_x), round(support_y)),
-                             (round(support_x), insert_y), 1)
+                                 (point[0] - 2, point[1] + 1, 4, 6), 1)

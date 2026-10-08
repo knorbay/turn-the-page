@@ -62,7 +62,7 @@ class SchoolAudioTests(unittest.TestCase):
     def test_combat_burst_cannot_steal_bell_or_classroom_and_sliders_work(self):
         sounds = NotebookSounds()
         sounds.start_ambience(0)
-        pygame.time.wait(1450)  # Let actual SDL fade-in finish before checking gains.
+        sounds.update(1.5)  # The scene director owns its rise in game time.
         sounds._apply_mix()
         calm_gain = sounds.score_channel.get_volume()
         with patch("pygame.time.get_ticks", return_value=5000):
@@ -88,7 +88,7 @@ class SchoolAudioTests(unittest.TestCase):
 
     def test_simultaneous_hits_have_a_bounded_effect_voice_pool(self):
         sounds = NotebookSounds()
-        with patch("pygame.time.get_ticks", side_effect=range(1000, 2000, 11)):
+        with patch("pygame.time.get_ticks", return_value=1000):
             for cue in ("hit", "heavy_hit", "enemy_break", "paper_break",
                         "pencil", "blade", "ink", "staple", "snip"):
                 sounds.play(cue, cooldown_ms=0)
@@ -182,24 +182,25 @@ class SchoolAudioTests(unittest.TestCase):
     def test_combat_mix_pushes_classroom_back_and_cues_make_headroom(self):
         sounds = NotebookSounds()
         sounds.start_ambience(0)
+        sounds.update(1.5)
         sounds._apply_mix()
         calm_classroom = sounds.classroom_channel.get_volume()
-        calm_score = sounds.score_channel.get_volume()
-        sounds.set_combat(True, boss=True)
+        sounds.set_combat(True, boss=True, boss_kind="moon_compass")
+        sounds.update(3)
         sounds.intensity = 1.0
         sounds._apply_mix()
         self.assertLess(sounds.classroom_channel.get_volume(), calm_classroom * .2)
 
         with patch("pygame.time.get_ticks", return_value=5000):
-            before_cue = sounds.score_channel.get_volume()
+            before_cue = sounds.boss_channel.get_volume()
             channel = sounds.play("boss_phase_shift", variant=1, pitch=1.0)
-            after_cue = sounds.score_channel.get_volume()
+            after_cue = sounds.boss_channel.get_volume()
         self.assertIs(channel, sounds.cue_channel)
         self.assertLess(after_cue, before_cue * .8)
         with patch("pygame.time.get_ticks", return_value=5500):
             sounds.update(1 / 60)
-        self.assertGreater(sounds.score_channel.get_volume(), after_cue)
-        self.assertLess(sounds.score_channel.get_volume(), calm_score)
+        self.assertGreater(sounds.boss_channel.get_volume(), after_cue)
+        self.assertAlmostEqual(sounds.boss_channel.get_volume(), before_cue, delta=.008)
         pygame.mixer.stop()
 
 

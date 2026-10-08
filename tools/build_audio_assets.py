@@ -14,9 +14,11 @@ from audio_composer import (
     SFX_VARIANT_COUNTS,
     write_wav,
 )
+from desk_audio import desk_score
 
 
 def build(destination: Path, pages=range(5)) -> list[Path]:
+    pages = tuple(pages)
     destination.mkdir(parents=True, exist_ok=True)
     composer = NotebookComposer(22050)
     outputs: list[Path] = []
@@ -40,6 +42,18 @@ def build(destination: Path, pages=range(5)) -> list[Path]:
         }
         for label, samples in variants.items():
             path = destination / f"page_{page}_{label}.wav"
+            write_wav(str(path), samples, composer.sample_rate)
+            outputs.append(path)
+    desk = destination / "desk"
+    desk.mkdir(parents=True, exist_ok=True)
+    for page in pages:
+        variants = {
+            "calm": desk_score(composer, page, 0),
+            "action": desk_score(composer, page, 1),
+            "boss": desk_score(composer, page, 1, True),
+        }
+        for label, samples in variants.items():
+            path = desk / f"page_{page}_{label}.wav"
             write_wav(str(path), samples, composer.sample_rate)
             outputs.append(path)
     return outputs

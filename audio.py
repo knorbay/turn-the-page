@@ -8,16 +8,21 @@ from pathlib import Path
 import pygame
 
 from audio_composer import NotebookComposer, SFX_NAMES, SFX_VARIANT_COUNTS
+from audio_mix import boss_music_pcm, condition_pcm, voice_gains
+from scene_music import (SELECTED_PAGE_TRACKS, SELECTED_BOSS_TRACKS,
+                         BOSS_ENTRANCE_TRACKS, BOSS_ENTRY_DELAYS, BOSS_PROFILES)
 
 
 _RAW_BANKS: dict[int, dict] = {}
-_SOUND_CACHE: dict[tuple[int, str], pygame.mixer.Sound] = {}
-_PITCHED_CACHE: dict[tuple[int, str, int, int], pygame.mixer.Sound] = {}
+_SOUND_CACHE: dict[tuple[int, int, str], pygame.mixer.Sound] = {}
+_PITCHED_CACHE: dict[tuple[int, int, str, int, int], pygame.mixer.Sound] = {}
+_CONDITIONED_CACHE = {}
+_BOSS_MUSIC_CACHE = {}
 
-SELECTED_PAGE_TRACKS = {
-    page: {label: f"desk/page_{page}_{label}.wav" for label in ("calm","action","boss")}
-    for page in range(5)
-}
+PAGE_DIP_SECONDS = .22
+PAGE_RISE_SECONDS = .30
+BOSS_MUSIC_BUS_GAIN = .65
+BOSS_REVEAL_RISE_SECONDS = 2.8
 
 RECORDED_SFX = {
     "pencil": "recorded/pencil_write.ogg",
@@ -25,8 +30,7 @@ RECORDED_SFX = {
     "blade": "recorded/blade_swing.wav",
 }
 
-# The selected sci-fi recording is intentionally quiet. Keep the classroom
-# behind each page's own score instead of letting it dominate that page.
+# Keep distant classroom voices behind the page's original pencil score.
 CLASSROOM_PAGE_GAIN = (.72, 1.0, .20, .58, .58)
 
 
@@ -46,6 +50,7 @@ SFX_PLAYBACK = {
     "pencil": CueProfile(.54, 35),
     "paper_break": CueProfile(.66, 55),
     "redraw": CueProfile(.62, 80),
+    "reload": CueProfile(.65, 95, (.985, 1.015, 1.0)),
     "giant_step": CueProfile(.62, 105),
     "giant_stomp": CueProfile(.72, 110, (1.0,), .12, 125),
     # Player tools keep their own weight and leave headroom for hit feedback.
@@ -76,10 +81,10 @@ SFX_PLAYBACK = {
     "snip": CueProfile(.72, 42, (.97, 1.02, .99), .05, 65),
     "ink_burst": CueProfile(.72, 45, (.96, 1.025, .985), .08, 85),
     # Semantic enemy and boss vocabulary for new actors.
-    "enemy_telegraph": CueProfile(.59, 95, (.97, 1.02, .99)),
-    "enemy_telegraph_ranged": CueProfile(.61, 120, (.97, 1.02, .99)),
+    "enemy_telegraph": CueProfile(.59, 95, (.97, 1.02, .99), .06, 100),
+    "enemy_telegraph_ranged": CueProfile(.61, 120, (.97, 1.02, .99), .07, 110),
     "enemy_telegraph_heavy": CueProfile(.68, 160, (.96, 1.015, .98), .05, 80),
-    "enemy_telegraph_air": CueProfile(.57, 120, (.97, 1.025, .99)),
+    "enemy_telegraph_air": CueProfile(.57, 120, (.97, 1.025, .99), .06, 100),
     "enemy_attack_melee": CueProfile(.68, 55, (.97, 1.02, .99), .05, 65),
     "enemy_attack_ranged": CueProfile(.66, 50, (.97, 1.025, .99), .05, 65),
     "enemy_attack_charge": CueProfile(.74, 95, (.96, 1.02, .985), .09, 100),
@@ -94,6 +99,10 @@ SFX_PLAYBACK = {
     "boss_opening": CueProfile(.75, 180, (.98, 1.02, 1.0), .16, 190, True),
     "boss_signature": CueProfile(.82, 240, (.97, 1.015, .99), .22, 260, True),
 }
+
+# Readable attacks keep their short notebook cues even in a burst of impacts.
+WARNING_RANK = {"enemy_telegraph": 1, "enemy_telegraph_air": 1,
+                "enemy_telegraph_ranged": 2, "enemy_telegraph_heavy": 3}
 
 
 # A legacy weapon call becomes the material actually drawn on that page. This
@@ -119,11 +128,11 @@ PAGE_SFX_OVERRIDES = {
 
 
 class NotebookSounds:
-    """Page-aware original score and tactile paper-world sound system.
+    """Page-aware music and tactile paper-world sound system.
 
-    Runtime WAVs are built from the included deterministic composer. Missing
-    assets fall back to the same local synthesis. Calm and action scores share
-    tempo/length, remain phase aligned, and crossfade with encounter pressure.
+    The first released soundtrack supplies the page and boss recordings.
+    Music scenes hand over through a short dip, while the familiar mix levels,
+    protected warnings and established notebook effects remain independent.
     """
 
     def __init__(self):
@@ -134,14 +143,35 @@ class NotebookSounds:
         self.score_low = [None] * 5
         self.score_high = [None] * 5
         self.score_boss = [None] * 5
+        self.boss_scores = {}
+        self.boss_entrances = {}
         self.ambient_channel = None
         self.score_channel = None
         self.combat_channel = None
         self.classroom_channel = None
         self.bell_channel = None
         self.cue_channel = None
+        self.warning_channel = None
+        self.music_intro_channel = None
+        self.boss_channel = None
+        self._pending_boss_score = None
+        self._boss_intro_elapsed = 0.0
+        self._boss_intro_duration = 0.0
+        self._boss_downbeat_delay = 0.0
+        self.boss_entry_elapsed = 0.0
+        self._page_scene = "calm"
+        self._page_scene_gain = 1.0
+        self._pending_page_scene = None
+        self._page_fade_elapsed = 0.0
+        self._page_fade_from = 1.0
+        self._page_attack_elapsed = None
+        self._page_attack_duration = PAGE_RISE_SECONDS
+        self._warning_rank = 0
+        self._warning_play_gain = 1.0
         self.effect_channels = ()
         self._effect_started = [0] * 6
+        self._effect_gains = [0.0] * 6
+        self._effect_names = [None] * 6
         self.classroom_sound = None
         self.bell_duck_until = 0
         self.transient_duck_started = 0
@@ -158,12 +188,14 @@ class NotebookSounds:
         self.combat_active = False
         self.boss_active = False
         self.action_variant = "page"
+        self.boss_kind = None
         self.intensity = 0.0
         self.quiet = False
         if not self.enabled:
             return
 
         self.sample_rate = int(pygame.mixer.get_init()[0])
+        self.output_channels = int(pygame.mixer.get_init()[2])
         self.composer = NotebookComposer(self.sample_rate)
         self.asset_root = Path(__file__).resolve().parent / "assets" / "audio"
         cache = _RAW_BANKS.setdefault(self.sample_rate, {"sfx": {}, "pages": {}})
@@ -176,7 +208,7 @@ class NotebookSounds:
                     relative = f"sfx_{name}_v{variation + 1}.wav"
                 path = self.asset_root / relative
                 if path.exists():
-                    key = (self.sample_rate, str(path))
+                    key = (self.sample_rate, self.output_channels, str(path))
                     if key not in _SOUND_CACHE:
                         _SOUND_CACHE[key] = pygame.mixer.Sound(str(path))
                     sound = _SOUND_CACHE[key]
@@ -184,36 +216,146 @@ class NotebookSounds:
                     raw_key = (name, variation)
                     if raw_key not in cache["sfx"]:
                         cache["sfx"][raw_key] = self.composer.sfx(name, variation)
-                    sound = pygame.mixer.Sound(buffer=cache["sfx"][raw_key])
+                    sound = self._mono_sound(cache["sfx"][raw_key])
+                if abs(pygame.mixer.get_init()[1]) == 16:
+                    channels = pygame.mixer.get_init()[2]
+                    mix_key = (self.sample_rate, channels, name, variation, relative)
+                    if mix_key not in _CONDITIONED_CACHE:
+                        signature = name.startswith("boss_") or name in WARNING_RANK or name in ("bell", "hero_sword", "hero_reveal")
+                        _CONDITIONED_CACHE[mix_key] = pygame.mixer.Sound(buffer=condition_pcm(
+                            sound.get_raw(), self.sample_rate, channels, signature))
+                    sound = _CONDITIONED_CACHE[mix_key]
                 sound.set_volume(1.0)
                 variants.append(sound)
             self.sound_variants[name] = tuple(variants)
             self.sounds[name] = variants[0]
 
         path = self.asset_root / "classroom_babble.wav"
-        key = (self.sample_rate, str(path))
+        key = (self.sample_rate, self.output_channels, str(path))
         if key not in _SOUND_CACHE:
             if path.exists():
                 _SOUND_CACHE[key] = pygame.mixer.Sound(str(path))
             else:
                 cache.setdefault("classroom", self.composer.classroom())
-                _SOUND_CACHE[key] = pygame.mixer.Sound(buffer=cache["classroom"])
+                _SOUND_CACHE[key] = self._mono_sound(cache["classroom"])
         self.classroom_sound = _SOUND_CACHE[key]
         self.classroom_sound.set_volume(.25)
         pygame.mixer.set_num_channels(max(20, pygame.mixer.get_num_channels()))
         # Score, classroom and the page-turn bell have protected channels:
         # a busy fight cannot cut a ring or replace the distant conversation.
-        # One further channel protects authored boss punctuation.
-        pygame.mixer.set_reserved(6)
+        # Boss punctuation and ordinary attack warnings have separate voices.
+        pygame.mixer.set_reserved(15)
         self.ambient_channel = pygame.mixer.Channel(0)
         self.score_channel = pygame.mixer.Channel(1)
         self.combat_channel = pygame.mixer.Channel(2)
         self.classroom_channel = pygame.mixer.Channel(3)
         self.bell_channel = pygame.mixer.Channel(4)
         self.cue_channel = pygame.mixer.Channel(5)
+        self.warning_channel = pygame.mixer.Channel(6)
+        # Musical entrances must survive boss attacks, warnings and hit bursts.
+        # Boss entrances and loops have their own protected music channels.
+        self.music_intro_channel = pygame.mixer.Channel(13)
+        self.boss_channel = pygame.mixer.Channel(14)
         # A small voice pool keeps clustered pellets and enemy deaths tactile
         # without summing a dozen sharp samples in the same audio frame.
-        self.effect_channels = tuple(pygame.mixer.Channel(i) for i in range(6, 12))
+        self.effect_channels = tuple(pygame.mixer.Channel(i) for i in range(7, 13))
+
+    def _mono_sound(self, raw):
+        if self.output_channels == 1:
+            return pygame.mixer.Sound(buffer=raw)
+        source = array("h")
+        source.frombytes(raw)
+        interleaved = array("h", (value for value in source
+                                 for _ in range(self.output_channels)))
+        return pygame.mixer.Sound(buffer=interleaved.tobytes())
+
+    def _asset_sound(self, relative):
+        path = self.asset_root / relative
+        if not path.exists():
+            return None
+        key = (self.sample_rate, self.output_channels, str(path))
+        if key not in _SOUND_CACHE:
+            _SOUND_CACHE[key] = pygame.mixer.Sound(str(path))
+        return _SOUND_CACHE[key]
+
+    def _ensure_boss_audio(self, kind, page):
+        key = kind if kind in SELECTED_BOSS_TRACKS else f"page:{page}"
+        if key not in self.boss_scores:
+            relative = SELECTED_BOSS_TRACKS.get(kind)
+            source = self._asset_sound(relative) if relative else None
+            # External recordings are already mastered stereo loops. Adding
+            # the legacy synthesized beat here would change their timbre.
+            self.boss_scores[key] = source if source is not None else self.score_boss[page]
+        if key not in self.boss_entrances:
+            relative = BOSS_ENTRANCE_TRACKS.get(kind)
+            self.boss_entrances[key] = self._asset_sound(relative) if relative else None
+        return self.boss_scores[key], self.boss_entrances[key]
+
+    def _boss_music_sound(self, source, page):
+        if abs(pygame.mixer.get_init()[1]) != 16:
+            return source
+        key = (self.sample_rate, self.output_channels, source, page)
+        if key not in _BOSS_MUSIC_CACHE:
+            _BOSS_MUSIC_CACHE[key] = pygame.mixer.Sound(
+                buffer=boss_music_pcm(source.get_raw(), self.sample_rate,
+                                      self.output_channels, page))
+        return _BOSS_MUSIC_CACHE[key]
+
+    def _cancel_boss_music(self):
+        self._pending_boss_score = None
+        self._boss_intro_elapsed = 0.0
+        self._boss_intro_duration = 0.0
+        self._boss_downbeat_delay = 0.0
+        self.boss_entry_elapsed = 0.0
+        if self.music_intro_channel is not None:
+            self.music_intro_channel.stop()
+            self.boss_channel.stop()
+
+    def _start_page_scene(self, scene, rise=PAGE_RISE_SECONDS):
+        page = max(0, min(4, self.ambient_chapter))
+        self._ensure_page_audio(page)
+        self.score_channel.stop()
+        self.combat_channel.stop()
+        channel, sound = ((self.score_channel, self.score_low[page]) if scene == "calm"
+                          else (self.combat_channel, self.score_high[page]))
+        channel.play(sound, loops=-1)
+        self._page_scene = scene
+        self._pending_page_scene = None
+        self._page_attack_duration = max(.001, rise)
+        self._page_attack_elapsed = 0.0
+        self._page_scene_gain = 0.0
+
+    def _request_page_scene(self, scene):
+        if scene == self._pending_page_scene:
+            return
+        if scene == self._page_scene:
+            if self._pending_page_scene is not None:
+                self._pending_page_scene = None
+                self._page_attack_duration = PAGE_RISE_SECONDS
+                self._page_attack_elapsed = self._page_scene_gain * PAGE_RISE_SECONDS
+            return
+        self._pending_page_scene = scene
+        self._page_fade_elapsed = 0.0
+        self._page_fade_from = self._page_scene_gain
+
+    def _update_page_music(self, dt):
+        if self.boss_active:
+            return
+        if self._pending_page_scene is not None:
+            self._page_fade_elapsed += dt
+            if self._page_fade_elapsed < PAGE_DIP_SECONDS:
+                self._page_scene_gain = self._page_fade_from * (1 - self._page_fade_elapsed / PAGE_DIP_SECONDS)
+            else:
+                remainder = self._page_fade_elapsed - PAGE_DIP_SECONDS
+                self._start_page_scene(self._pending_page_scene)
+                self._page_attack_elapsed = remainder
+                self._page_scene_gain = min(1.0, remainder / PAGE_RISE_SECONDS)
+        elif self._page_attack_elapsed is not None:
+            self._page_attack_elapsed += dt
+            self._page_scene_gain = min(1.0, self._page_attack_elapsed / self._page_attack_duration)
+            if self._page_scene_gain >= 1.0:
+                self._page_attack_elapsed = None
+        self._apply_mix()
 
     def _bell_duck(self) -> float:
         remaining = self.bell_duck_until - pygame.time.get_ticks()
@@ -266,7 +408,7 @@ class NotebookSounds:
         if mixer is None or abs(int(mixer[1])) != 16:
             return sound
         pitch_key = max(250, min(4000, round(pitch * 1000)))
-        key = (self.sample_rate, name, variation, pitch_key)
+        key = (self.sample_rate, int(mixer[2]), name, variation, pitch_key)
         cached = _PITCHED_CACHE.get(key)
         if cached is not None:
             return cached
@@ -298,12 +440,11 @@ class NotebookSounds:
     def _ensure_page_audio(self, page: int) -> None:
         if self.ambience[page] is not None:
             return
-        from desk_audio import desk_score
         labels = {
             "ambience": (self.ambience, lambda: self.composer.ambience(page)),
-            "calm": (self.score_low, lambda: desk_score(self.composer, page, 0)),
-            "action": (self.score_high, lambda: desk_score(self.composer, page, 1)),
-            "boss": (self.score_boss, lambda: desk_score(self.composer, page, 1, True)),
+            "calm": (self.score_low, lambda: self.composer.score(page, 0)),
+            "action": (self.score_high, lambda: self.composer.score(page, 1)),
+            "boss": (self.score_boss, lambda: self.composer.score(page, 1, True)),
         }
         cache = _RAW_BANKS[self.sample_rate]["pages"]
         page_cache = cache.setdefault(page, {})
@@ -314,16 +455,25 @@ class NotebookSounds:
             if path.exists():
                 if label == "boss" and selected == SELECTED_PAGE_TRACKS.get(page, {}).get("action") \
                         and self.score_high[page] is not None:
-                    collection[page] = self.score_high[page]
+                    collection[page] = self._boss_music_sound(self.score_high[page], page)
                     continue
-                key = (self.sample_rate, str(path))
+                key = (self.sample_rate, self.output_channels, str(path))
                 if key not in _SOUND_CACHE:
                     _SOUND_CACHE[key] = pygame.mixer.Sound(str(path))
                 collection[page] = _SOUND_CACHE[key]
             else:
                 if label not in page_cache:
                     page_cache[label] = factory()
-                collection[page] = pygame.mixer.Sound(buffer=page_cache[label])
+                collection[page] = self._mono_sound(page_cache[label])
+            if label == "boss":
+                # Prepare once at page load; its first entrance only retrieves
+                # the cached playback Sound and never scans a loop mid-frame.
+                collection[page] = self._boss_music_sound(collection[page], page)
+        # Decode each current-page guardian before its entrance. Switching
+        # identities during an encounter retrieves the Sound without file I/O.
+        for kind, profile in BOSS_PROFILES.items():
+            if profile["page"] == page:
+                self._ensure_boss_audio(kind, page)
 
     def _mix_gain(self, base: float, transient=True) -> float:
         quiet_scale = .14 if self.quiet else 1.0
@@ -337,14 +487,31 @@ class NotebookSounds:
             return
         if self.ambient_channel is not None:
             ambience = .19 * (1.0 - self.intensity * .28)
+            if self.boss_active:
+                ambience *= .28
             self.ambient_channel.set_volume(self._mix_gain(ambience))
+        # Original recordings keep their familiar level beneath notebook ink.
+        page_gain = self._page_scene_gain if not self.boss_active else 0.0
         if self.score_channel is not None:
-            calm = .20 * (1.0 - self.intensity * .62)
+            calm = .20 * (1.0 - .62 * self.intensity) * page_gain if self._page_scene == "calm" else 0.0
             self.score_channel.set_volume(self._mix_gain(calm))
         if self.combat_channel is not None:
-            action_ceiling = .255 if self.boss_active else .235
-            action = action_ceiling * self.intensity if self.combat_active else 0.0
+            action = .235 * self.intensity * page_gain if self._page_scene == "action" else 0.0
             self.combat_channel.set_volume(self._mix_gain(action))
+        if self.boss_channel is not None:
+            intro_share = 0.0
+            if self._boss_intro_duration > self._boss_intro_elapsed:
+                span = max(.01, self._boss_intro_duration - self._boss_downbeat_delay)
+                intro_share = min(1.0, (self._boss_intro_duration - self._boss_intro_elapsed) / span)
+            # The score grows through the short drawing reveal. Complete
+            # recorded phrases retain their own dynamics during the fight;
+            # the warning bus can still dip the music between those phrases.
+            reveal_gain = .45 + .55 * min(1.0,
+                self.boss_entry_elapsed / BOSS_REVEAL_RISE_SECONDS)
+            boss_gain = (BOSS_MUSIC_BUS_GAIN * (.93 + .07 * self.intensity)
+                         * reveal_gain if self.boss_active else 0.0)
+            self.boss_channel.set_volume(self._mix_gain(boss_gain * (1.0 - intro_share)))
+            self.music_intro_channel.set_volume(self._mix_gain(boss_gain * intro_share))
         if self.classroom_channel is not None:
             # Keep the voices beneath each score, lower them again in combat.
             # Split gain across sound/channel for finer mixer steps at this
@@ -352,7 +519,7 @@ class NotebookSounds:
             page = max(0, min(4, self.ambient_chapter))
             combat_scale = .70 if self.combat_active else 1.0
             if self.boss_active:
-                combat_scale *= .62
+                combat_scale *= .24
             self.classroom_channel.set_volume(
                 self._mix_gain(.18 * CLASSROOM_PAGE_GAIN[page]
                                * combat_scale
@@ -365,11 +532,30 @@ class NotebookSounds:
             self.cue_channel.set_volume(
                 max(0.0, min(1.0, self.master_volume * self.sfx_volume
                              * self._cue_play_gain)))
+        if self.warning_channel is not None:
+            self.warning_channel.set_volume(
+                max(0.0, min(1.0, self.master_volume * self.sfx_volume
+                             * self._warning_play_gain)))
 
     def update(self, dt=0.0):
         """Release bell and combat-cue ducking outside encounter updates."""
-        if not self.enabled or not (self.bell_duck_until
-                                    or self.transient_duck_until):
+        if not self.enabled:
+            return
+        dt = max(0.0, float(dt))
+        self._update_page_music(dt)
+        revealing_score = self.boss_active and self.boss_entry_elapsed < BOSS_REVEAL_RISE_SECONDS
+        if self.boss_active:
+            self.boss_entry_elapsed += dt
+        intro_advancing = self._boss_intro_elapsed < self._boss_intro_duration
+        if intro_advancing:
+            self._boss_intro_elapsed += dt
+            if self._pending_boss_score is not None and self._boss_intro_elapsed >= self._boss_downbeat_delay:
+                self.boss_channel.play(self._pending_boss_score, loops=-1)
+                self._pending_boss_score = None
+        if intro_advancing or revealing_score:
+            self._apply_mix()
+        self._rebalance_effects()
+        if not (self.bell_duck_until or self.transient_duck_until):
             return
         self._apply_mix()
         now = pygame.time.get_ticks()
@@ -379,6 +565,13 @@ class NotebookSounds:
             self.transient_duck_started = 0
             self.transient_duck_until = 0
             self.transient_duck_depth = 0.0
+
+    def _rebalance_effects(self):
+        requested = [gain * self.master_volume * self.sfx_volume
+                     if channel.get_busy() else 0.0
+                     for gain, channel in zip(self._effect_gains, self.effect_channels)]
+        for channel, gain in zip(self.effect_channels, voice_gains(requested)):
+            channel.set_volume(gain)
 
     def play(self, name, variant=None, *, pitch=None, volume=1.0,
              cooldown_ms=None):
@@ -397,6 +590,10 @@ class NotebookSounds:
             except (TypeError, ValueError, OverflowError):
                 chosen_cooldown = profile.cooldown_ms
             last_played = self._last_played.get(resolved)
+            if cooldown_ms is None:
+                repeated = resolved in ("pencil", "paper_step", "hit", "blocked", "ink") or resolved.startswith("enemy_hit_")
+                if repeated:
+                    chosen_cooldown = max(chosen_cooldown, 90 if resolved == "pencil" else 55)
             if (last_played is not None and chosen_cooldown > 0
                     and 0 <= now - last_played < chosen_cooldown):
                 return None
@@ -439,6 +636,15 @@ class NotebookSounds:
                                             + round(sound.get_length() * 1000))
                 self._apply_mix()
                 channel = self.bell_channel
+            elif resolved in WARNING_RANK and self.warning_channel is not None:
+                rank = WARNING_RANK[resolved]
+                if self.warning_channel.get_busy() and self._warning_rank > rank:
+                    return None
+                self._warning_rank = rank
+                self._warning_play_gain = profile.volume * self._safe_unit(volume)
+                self.warning_channel.play(sound)
+                self._apply_mix()
+                channel = self.warning_channel
             elif profile.priority and self.cue_channel is not None:
                 self._cue_play_gain = profile.volume * self._safe_unit(volume)
                 self.cue_channel.play(sound)
@@ -447,15 +653,15 @@ class NotebookSounds:
             else:
                 free = next((index for index, voice in enumerate(self.effect_channels)
                              if not voice.get_busy()), None)
-                busy = sum(voice.get_busy() for voice in self.effect_channels)
                 index = (free if free is not None else
                          min(range(len(self.effect_channels)),
                              key=self._effect_started.__getitem__))
                 channel = self.effect_channels[index]
                 channel.play(sound)
                 self._effect_started[index] = now
-                burst_gain = 1.0 if busy < 2 else .83 if busy < 4 else .68
-                channel.set_volume(cue_gain * burst_gain)
+                self._effect_gains[index] = profile.volume * self._safe_unit(volume)
+                self._effect_names[index] = resolved
+                self._rebalance_effects()
             if channel is not None:
                 self._last_played[resolved] = now
                 self._start_transient_duck(profile.duck, profile.duck_ms)
@@ -478,6 +684,7 @@ class NotebookSounds:
         self.sfx_volume = safe_gain("sfx_volume", .85)
         self.music_volume = safe_gain("music_volume", .55)
         self._apply_mix()
+        self._rebalance_effects()
 
     def start_ambience(self, chapter=0):
         if not self.enabled or self.ambient_channel is None:
@@ -490,41 +697,64 @@ class NotebookSounds:
             self._apply_mix()
             return
         self.ambient_chapter = chapter
+        self._cancel_boss_music()
         self.combat_active = False
         self.boss_active = False
+        self.boss_kind = None
         self.action_variant = "page"
         self.intensity = 0.0
         self.quiet = False
         self.ambient_channel.play(self.ambience[chapter], loops=-1, fade_ms=700)
-        self.score_channel.play(self.score_low[chapter], loops=-1, fade_ms=900)
-        # Both score interpretations start together. The action layer is kept
-        # silent until the first red arena stroke closes.
-        self.combat_channel.play(self.score_high[chapter], loops=-1, fade_ms=80)
+        self._start_page_scene("calm", rise=.9)
         if not self.classroom_channel.get_busy():
             self.classroom_channel.play(self.classroom_sound, loops=-1, fade_ms=1400)
         self._apply_mix()
 
-    def set_combat(self, active=True, boss=False):
+    def set_combat(self, active=True, boss=False, boss_kind=None):
         if not self.enabled or self.combat_channel is None:
             return
         active = bool(active)
         boss = bool(boss and active)
+        kind = boss_kind if boss else None
+        boss_entry = boss and (not self.combat_active or not self.boss_active
+                              or kind != self.boss_kind)
+        leaving_boss = self.boss_active and not boss
         self.combat_active = active
         self.boss_active = boss
+        self.boss_kind = kind
         if active:
             page = max(0, min(len(self.score_high) - 1, self.ambient_chapter))
-            desired = self.score_boss[page] if boss else self.score_high[page]
-            variant = "boss" if boss else "page"
-            # A boss cue intentionally restarts on its entrance; ordinary
-            # combat remains phase-aligned with the calm page score.
-            if variant != self.action_variant or not self.combat_channel.get_busy():
-                self.combat_channel.play(desired, loops=-1, fade_ms=240)
-            self.action_variant = variant
+            self._ensure_page_audio(page)
+            if boss_entry:
+                self._cancel_boss_music()
+                self._pending_page_scene = None
+                self._page_attack_elapsed = None
+                self._page_scene_gain = 1.0
+                desired, entrance = self._ensure_boss_audio(kind, page)
+                if entrance is not None:
+                    self.music_intro_channel.play(entrance)
+                    self._boss_intro_duration = entrance.get_length()
+                    self._boss_downbeat_delay = min(self._boss_intro_duration,
+                        max(0.0, BOSS_ENTRY_DELAYS.get(kind, self._boss_intro_duration - .12)))
+                    self._pending_boss_score = desired
+                else:
+                    self.boss_channel.play(desired, loops=-1, fade_ms=120)
+            elif not boss:
+                self._cancel_boss_music()
+                if leaving_boss:
+                    self._start_page_scene("action")
+                else:
+                    self._request_page_scene("action")
+            self.action_variant = f"boss:{kind or 'page'}" if boss else "page"
             self.intensity = max(self.intensity, .44 if not boss else .70)
         else:
+            self._cancel_boss_music()
+            self.action_variant = "page"
             self.intensity = 0.0
-            # Keep the desk loop running silently so the next fight joins its beat.
-            self.combat_channel.set_volume(0)
+            if leaving_boss:
+                self._start_page_scene("calm")
+            else:
+                self._request_page_scene("calm")
         self._apply_mix()
 
     def set_intensity(self, value: float, boss: bool = False):

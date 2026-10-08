@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections import deque
 from copy import deepcopy
+import math
 
 
 DEFAULT_BEHAVIOR = {
@@ -51,7 +52,13 @@ class BehaviorLedger:
                     "enemy_defeats", "boss_clear_seconds", "page_clear_seconds", "combat_motion"):
             value = snapshot.get(key)
             if isinstance(value, dict):
-                self.data[key].update(value)
+                for name, number in value.items():
+                    if key == "combat_motion" and name not in self.data[key]:
+                        continue
+                    repaired = self._nonnegative_number(number)
+                    self.data[key][name] = (repaired if key in (
+                        "boss_clear_seconds", "page_clear_seconds", "combat_motion")
+                        else int(repaired))
         recent = snapshot.get("recent", [])
         if isinstance(recent, list):
             self.data["recent"] = [entry for entry in recent[-16:] if isinstance(entry, dict)]
@@ -63,6 +70,14 @@ class BehaviorLedger:
         scenario = snapshot.get("final_scenario", "")
         if isinstance(scenario, str):
             self.data["final_scenario"] = scenario
+
+    @staticmethod
+    def _nonnegative_number(value):
+        try:
+            number = float(value)
+        except (TypeError, ValueError, OverflowError):
+            return 0
+        return max(0.0, number) if math.isfinite(number) else 0
 
     @staticmethod
     def _key(value, fallback="unknown"):

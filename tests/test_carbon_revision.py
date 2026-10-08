@@ -10,6 +10,11 @@ from game import Game
 from chapters import build_chapter
 from entities import LostSketch
 from page_experiences import SketchTrial
+from action_content import WeaponPickup
+from sketch_discovery import SketchDiscovery
+from major_campaign import SecretPocket
+from optional_encounters import OptionalGuardianPocket
+from sketches import SKETCHES
 from advanced_enemies import AdvancedEnemy, RedactionDirector
 from settings import WIDTH, HEIGHT
 
@@ -29,20 +34,32 @@ class CarbonRevisionContracts(unittest.TestCase):
     def near(self,t):
         self.g.player.x=t.sketch.x-self.g.player.WIDTH/2
         self.g.player.y=t.sketch.y-self.g.player.HEIGHT
-    def test_all_twelve_scraps_require_optional_trials_but_earned_saves_stay_earned(self):
-        count=0
+    def test_all_sketches_have_varied_discoveries_and_restore_earned_saves(self):
+        count=0;methods=set();trials=[]
         for page in range(5):
             runtime=build_chapter(page)
             scraps=[e for e in runtime.entities.items if isinstance(e,LostSketch)]
             count+=len(scraps)
             for sketch in scraps:
-                trial=sketch.trial
-                self.assertLess(abs(sum(trial.bounds)/2-sketch.x),350,
-                                "the guard must stay near its scrap, not in the next encounter")
-            self.assertTrue(all(isinstance(s.trial,SketchTrial) and not s.trial.mandatory for s in scraps))
+                trial=getattr(sketch,'trial',None)
+                if isinstance(trial,SketchTrial):
+                    trials.append(sketch.secret_id)
+                    self.assertFalse(trial.mandatory)
+                    self.assertLess(abs(sum(trial.bounds)/2-sketch.x),350)
+                elif getattr(sketch,'pocket',None) is not None:
+                    self.assertIsInstance(sketch.pocket,(SecretPocket,OptionalGuardianPocket))
+                    self.assertFalse(sketch.pocket.mandatory)
+                else:
+                    self.assertIsInstance(sketch.discovery,SketchDiscovery)
+                    methods.add(sketch.discovery.kind)
             restored=build_chapter(page,[s.secret_id for s in scraps])
             self.assertTrue(all(e.completed for e in restored.entities.items if isinstance(e,SketchTrial)))
-        self.assertEqual(count,12)
+            self.assertTrue(all(e.completed and e.state=='ready' for e in restored.entities.items
+                                if isinstance(e,SketchDiscovery)))
+            self.assertTrue(all(e.discovered for e in restored.entities.items if isinstance(e,LostSketch)))
+        self.assertEqual(count,len(SKETCHES))
+        self.assertEqual(trials,['practice_monster'])
+        self.assertEqual(len(methods),11)
     def test_pressing_collect_starts_a_visible_fight_without_granting_reward(self):
         t=self.trial;self.near(t)
         t.sketch.update(.01,self.ctx,True)
@@ -55,6 +72,10 @@ class CarbonRevisionContracts(unittest.TestCase):
         for _ in range(60):t.update(1/60,self.ctx)
         self.assertEqual(enemy.notebook_reveal,1)
         enemy.dead=True;t.update(.01,self.ctx)
+        self.assertFalse(t.completed)
+        self.assertNotEqual(enemy.kind,t.enemies[0].kind)
+        for _ in range(60):t.update(1/60,self.ctx)
+        t.enemies[0].dead=True;t.update(.01,self.ctx)
         self.assertTrue(t.completed)
         self.assertFalse(t.sketch.discovered)
         t.sketch.update(.01,self.ctx,True)
@@ -71,19 +92,31 @@ class CarbonRevisionContracts(unittest.TestCase):
         arena=next(e for e in self.g.level.entities.items if getattr(e,'is_combat_arena',False))
         arena.encounter_active=True
         self.assertFalse(t.begin(self.ctx));self.assertEqual(t.enemies,[])
-    def test_rifle_unlock_requires_both_archive_opponents_and_survives_save(self):
+    def test_copied_badge_does_not_replace_eight_round_gun_and_rifle_is_independent(self):
         self.g.level.load_chapter(3,'start',self.g.player,self.g.camera)
-        self.g.player.release_all_locks()
+        self.g._apply_page_identity();self.g.player.release_all_locks()
         self.ctx=self.g.level.context(self.g.player,self.g.camera,self.g.particles,self.g.sounds)
-        t=next(e for e in self.g.level.entities.items if isinstance(e,SketchTrial))
-        self.near(t);self.assertTrue(t.begin(self.ctx))
-        self.assertNotIn('carbon_lance',self.g.weapons.unlocked)
-        first=t.enemies[0].kind;t.enemies[0].dead=True;t.update(.01,self.ctx)
-        self.assertNotEqual(first,t.enemies[0].kind)
-        self.assertNotIn('carbon_lance',self.g.weapons.unlocked)
-        t.enemies[0].dead=True;t.update(.01,self.ctx)
-        self.assertIn('carbon_lance',self.g.weapons.unlocked)
+        w=self.g.weapons;w.unlock('ink_pistol');w.select('ink_pistol')
+        self.assertEqual(w.current.mag_size,8)
+        w.current.ammo=6
+        d=next(e for e in self.g.level.entities.items
+               if isinstance(e,SketchDiscovery) and e.sketch.secret_id=='agent_badge')
+        rifle=next(e for e in self.g.level.entities.items
+                   if isinstance(e,WeaponPickup) and e.weapon_id=='carbon_lance')
+        self.assertFalse(rifle.requires_sketch)
+        self.g.player.x,self.g.player.y=d.pressure_line.x1+60-12,430-48
+        self.g.player.on_ground=True
+        for _ in range(45):d.update(1/60,self.ctx)
+        self.assertTrue(d.completed);d.sketch.update(.01,self.ctx,True)
+        self.assertIn('agent_badge',self.g.save.data['secrets'])
+        self.assertEqual(w.current_id,'ink_pistol');self.assertEqual(w.current.ammo,6)
+        self.assertEqual(w.current.mag_size,8);self.assertNotIn('carbon_lance',w.unlocked)
+        self.g.player.x,self.g.player.y=rifle.x-12,542
+        for _ in range(60):rifle.update(1/60,self.ctx)
+        self.assertTrue(rifle.collected);self.assertIn('carbon_lance',w.available_ids)
+        self.assertEqual(w.current_id,'ink_pistol');self.assertEqual(w.current.ammo,6)
         self.assertIn('carbon_lance',self.g.save.data['weapons'])
+        w.select('carbon_lance');self.assertEqual(w.current.mag_size,1)
     def equip(self,weapon):
         w=self.g.weapons;w.active_loadout=None;w.configure_page(3);w.unlock(weapon);w.select(weapon)
         self.g.player.x,self.g.player.y=300,450

@@ -40,10 +40,10 @@ def build_scene(chapter: int, arena_id: str, weapon_id: str):
     game = Game(screen, Path(temporary.name) / "qa-save.json")
     game.level.load_chapter(chapter, "start", game.player, game.camera)
     game.weapons = WeaponSystem(game.player)
+    game._attach_runtime()
     for unlock_id in WEAPON_ORDER:
         game.weapons.unlock(unlock_id)
     game.weapons.select(weapon_id)
-    game._attach_runtime()
     game.state = "playing"
 
     arena = next(

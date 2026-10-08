@@ -6,6 +6,7 @@ import pygame
 from action_content import WeaponPickup
 from combat import CombatArena
 from game import Game
+from page_arsenal import PAGE_ENTRY_TOOLS
 from settings import WIDTH,HEIGHT
 
 
@@ -35,9 +36,11 @@ def main():
             game.player.x=arena.start_x-150
         game._apply_page_identity()
         for gift in sorted((e for e in game.level.entities.items if isinstance(e,WeaponPickup)),key=lambda e:e.x):
-            if gift.x<=game.player.x:
+            if gift.x <= (arena.start_x if args.room else game.player.x):
                 game.weapons.unlock(gift.weapon_id)
                 game.weapons.select(gift.weapon_id)
+        if args.room and not game.weapons.available_ids:
+            game.weapons.lend_drawn_tool(PAGE_ENTRY_TOOLS[page])
         game.state='playing'
         game.level.toast='CHAPTER PRACTICE / your campaign save is safe'
         game.level.toast_time=5

@@ -37,22 +37,17 @@ def _heart(surface, center, size, filled, flash=0.0, fresh=0.0):
 
 
 def draw_health(surface, renderer, player, time):
-    rect = pygame.Rect(24, 20, 216, 78)
+    rect = pygame.Rect(24, 20, 152, 58)
     plate = pygame.Surface(rect.size, pygame.SRCALPHA)
     plate.fill((247, 242, 222, 239))
     surface.blit(plate, rect)
     renderer.rough_rect(surface, (156, 144, 120), rect, 1, 1903)
     fresh = min(1.0, getattr(player, "health_restore_flash", 0.0))
     health = max(0, min(player.max_health, player.health))
-    label = "FRESH INK" if fresh else "VITAL INK"
-    color = (89, 114, 84) if fresh else (94, 82, 69)
-    surface.blit(renderer.font_small.render(label, True, color), (38, 27))
     for index in range(3):
         filled = index < health
         flash = (min(1.0, player.hurt_flash * 2.4)
                  if index == health and not filled else 0.0)
         offset = math.sin(time*36) * flash * 1.5
-        _heart(surface, (round(51+index*36+offset),66), 27, filled, flash, fresh)
-    count = renderer.font.render(f"{health} / 3", True, (96, 65, 55))
-    surface.blit(count, count.get_rect(center=(185,65)))
+        _heart(surface, (round(52+index*45+offset),49), 29, filled, flash, fresh)
     return rect

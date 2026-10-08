@@ -1,0 +1,974 @@
+{
+  "schema_version": 1,
+  "score_id": "original-first-version",
+  "prepared_on": "2026-10-03",
+  "description": "Restored first-version playlist from the 0.9/0.10 native game packages. Audio files are used byte-for-byte, without excerpts, normalisation, remixing or newly generated entrance music.",
+  "historical_bundles": [
+    {
+      "bundle": "MARGINBORN-macOS-0.9.zip",
+      "version": "0.9",
+      "bundle_sha256": "9c3c6b7530fb5b3e2cb0287866e03f5758522b21abf3a6846b359b6c0b428163",
+      "built_at": "2026-09-10T00:56:34",
+      "built_at_timezone": "Europe/Istanbul (ZIP stores local timestamp without offset)",
+      "selection_evidence": "Frozen audio module inspected in memory: pages 0–2 select the six CC0 recordings; pages 3–4 and all page bosses use root page WAVs. Binary was not executed."
+    },
+    {
+      "bundle": "Turn-the-Page-macOS-0.9.0-beta.zip",
+      "version": "0.9.0-beta",
+      "bundle_sha256": "2e789fed400961a9e10d9d9d5de3d9bfef8b0a130c44ff72b8a80f953aadbc78",
+      "built_at": "2026-09-11T12:36:08",
+      "built_at_timezone": "Europe/Istanbul (ZIP stores local timestamp without offset)",
+      "selection_evidence": "Frozen audio module inspected in memory: pages 0–2 select the six CC0 recordings; pages 3–4 and all page bosses use root page WAVs. Binary was not executed."
+    },
+    {
+      "bundle": "Turn-the-Page-macOS-0.10.0-beta.zip",
+      "version": "0.10.0-beta",
+      "bundle_sha256": "825117b58f752cb9268b073a8ee60dc2569809473bf4d0023ac3b45b70d99e69",
+      "built_at": "2026-09-22T23:43:10",
+      "built_at_timezone": "Europe/Istanbul (ZIP stores local timestamp without offset)",
+      "selection_evidence": "Frozen audio module inspected in memory: pages 0–2 select the six CC0 recordings; pages 3–4 and all page bosses use root page WAVs. Binary was not executed."
+    }
+  ],
+  "page_tracks": {
+    "0": {
+      "calm": "music/page_0_calm.ogg",
+      "action": "music/page_0_action.ogg",
+      "boss": "page_0_boss.wav"
+    },
+    "1": {
+      "calm": "music/page_1_calm.mp3",
+      "action": "music/page_1_action.mp3",
+      "boss": "page_1_boss.wav"
+    },
+    "2": {
+      "calm": "music/page_2_calm.mp3",
+      "action": "music/page_2_action.mp3",
+      "boss": "page_2_boss.wav"
+    },
+    "3": {
+      "calm": "page_3_calm.wav",
+      "action": "page_3_action.wav",
+      "boss": "page_3_boss.wav"
+    },
+    "4": {
+      "calm": "page_4_calm.wav",
+      "action": "page_4_action.wav",
+      "boss": "page_4_boss.wav"
+    }
+  },
+  "boss_roles": {
+    "moon_compass": {
+      "page": 0,
+      "name": "Moon Ronin",
+      "file": "page_0_boss.wav"
+    },
+    "wanted_sketch": {
+      "page": 1,
+      "name": "Wanted Sketch",
+      "file": "page_1_boss.wav"
+    },
+    "railroad_stapler": {
+      "page": 1,
+      "name": "Railroad Stapler",
+      "file": "page_1_boss.wav"
+    },
+    "orbital_mistake": {
+      "page": 2,
+      "name": "Orbital Sentinel",
+      "file": "page_2_boss.wav"
+    },
+    "scissor_director": {
+      "page": 3,
+      "name": "Head of Redaction",
+      "file": "page_3_boss.wav"
+    },
+    "final_editor": {
+      "page": 4,
+      "name": "Final Editor",
+      "file": "page_4_boss.wav"
+    },
+    "baby_face_giant": {
+      "page": 0,
+      "name": "Lost Expedition giant",
+      "file": "page_0_boss.wav"
+    },
+    "cloud_kite": {
+      "page": 0,
+      "name": "Cloud Kite",
+      "file": "page_0_boss.wav"
+    }
+  },
+  "entrance_tracks": {},
+  "entry_delays": {},
+  "boss_reuse_note": "Eight current boss identities reuse five original page boss loops. Wanted Sketch and Railroad Stapler share the Western loop. Moon Ronin and the two first-page secret bosses share the Ronin loop. No claim is made that the earliest package contained all current secret encounters.",
+  "original_score_note": {
+    "tr": "4. ve 5. sayfanın müzikleri ile boss döngüleri oyunun özgün defter besteleridir; üçüncü taraf örnek içermez.",
+    "en": "Page 4–5 music and the boss loops are the game's original notebook compositions, with no third-party samples."
+  },
+  "runtime_note": "Modern sequential scene handovers remain. The six independent CC0 recordings are not phase-aligned stems. No audio processing is applied to their stored files.",
+  "files": [
+    {
+      "file": "music/page_0_calm.ogg",
+      "page": 0,
+      "kind": "calm",
+      "roles": [
+        "page_0_calm"
+      ],
+      "encoded_sha256": "c896e67a5546eb4c1824b93d22fcbf8f065adc1c3990a35e4242d4df759c7ede",
+      "bytes": 815059,
+      "sample_rate": 16000,
+      "channels": 2,
+      "duration_seconds": 144.530687,
+      "duration_source": "libsndfile source frames",
+      "decoded_sample_rate": 22050,
+      "decoded_channels": 2,
+      "decoded_pcm_sha256": "a4e47972ec7dce47aa05d7100de633d5624e73aa896d8702690d01f799e342fc",
+      "decoded_rms": 0.03286427,
+      "decoded_peak": 0.36489868,
+      "audio_edits": [],
+      "unchanged_from_first_version": true,
+      "historical_proofs": [
+        {
+          "bundle": "MARGINBORN-macOS-0.9.zip",
+          "version": "0.9",
+          "bundle_sha256": "9c3c6b7530fb5b3e2cb0287866e03f5758522b21abf3a6846b359b6c0b428163",
+          "member": "MARGINBORN.app/Contents/Resources/assets/audio/music/page_0_calm.ogg",
+          "encoded_sha256": "c896e67a5546eb4c1824b93d22fcbf8f065adc1c3990a35e4242d4df759c7ede",
+          "matches_current": true
+        },
+        {
+          "bundle": "Turn-the-Page-macOS-0.9.0-beta.zip",
+          "version": "0.9.0-beta",
+          "bundle_sha256": "2e789fed400961a9e10d9d9d5de3d9bfef8b0a130c44ff72b8a80f953aadbc78",
+          "member": "Turn the Page.app/Contents/Resources/assets/audio/music/page_0_calm.ogg",
+          "encoded_sha256": "c896e67a5546eb4c1824b93d22fcbf8f065adc1c3990a35e4242d4df759c7ede",
+          "matches_current": true
+        },
+        {
+          "bundle": "Turn-the-Page-macOS-0.10.0-beta.zip",
+          "version": "0.10.0-beta",
+          "bundle_sha256": "825117b58f752cb9268b073a8ee60dc2569809473bf4d0023ac3b45b70d99e69",
+          "member": "Turn the Page.app/Contents/Resources/assets/audio/music/page_0_calm.ogg",
+          "encoded_sha256": "c896e67a5546eb4c1824b93d22fcbf8f065adc1c3990a35e4242d4df759c7ede",
+          "matches_current": true
+        }
+      ],
+      "title": "Koto with Shamisen and Piano",
+      "composer": "Tozan",
+      "source_url": "https://opengameart.org/content/midi-pack-1-24-new-tunes",
+      "license": "CC0 1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "credit": "\"Koto with Shamisen and Piano\" — Tozan. Midi Pack 1 — 24 New Tunes, OpenGameArt. CC0 1.0.",
+      "source_kind": "cc0_recording",
+      "collection": "Midi Pack 1 — 24 New Tunes",
+      "source_id": "Midi Pack 1 — 24 New Tunes"
+    },
+    {
+      "file": "music/page_0_action.ogg",
+      "page": 0,
+      "kind": "action",
+      "roles": [
+        "page_0_action"
+      ],
+      "encoded_sha256": "4fc42c3e8e2b287b0ded43e25733603b06e86b6f932a38826da7e2de5f57156f",
+      "bytes": 974349,
+      "sample_rate": 16000,
+      "channels": 2,
+      "duration_seconds": 172.875812,
+      "duration_source": "libsndfile source frames",
+      "decoded_sample_rate": 22050,
+      "decoded_channels": 2,
+      "decoded_pcm_sha256": "dca149824687737a1db1572c1030ba15f89ca8d9c97f61280d1a5519b1d8ffdc",
+      "decoded_rms": 0.0498012,
+      "decoded_peak": 0.43786621,
+      "audio_edits": [],
+      "unchanged_from_first_version": true,
+      "historical_proofs": [
+        {
+          "bundle": "MARGINBORN-macOS-0.9.zip",
+          "version": "0.9",
+          "bundle_sha256": "9c3c6b7530fb5b3e2cb0287866e03f5758522b21abf3a6846b359b6c0b428163",
+          "member": "MARGINBORN.app/Contents/Resources/assets/audio/music/page_0_action.ogg",
+          "encoded_sha256": "4fc42c3e8e2b287b0ded43e25733603b06e86b6f932a38826da7e2de5f57156f",
+          "matches_current": true
+        },
+        {
+          "bundle": "Turn-the-Page-macOS-0.9.0-beta.zip",
+          "version": "0.9.0-beta",
+          "bundle_sha256": "2e789fed400961a9e10d9d9d5de3d9bfef8b0a130c44ff72b8a80f953aadbc78",
+          "member": "Turn the Page.app/Contents/Resources/assets/audio/music/page_0_action.ogg",
+          "encoded_sha256": "4fc42c3e8e2b287b0ded43e25733603b06e86b6f932a38826da7e2de5f57156f",
+          "matches_current": true
+        },
+        {
+          "bundle": "Turn-the-Page-macOS-0.10.0-beta.zip",
+          "version": "0.10.0-beta",
+          "bundle_sha256": "825117b58f752cb9268b073a8ee60dc2569809473bf4d0023ac3b45b70d99e69",
+          "member": "Turn the Page.app/Contents/Resources/assets/audio/music/page_0_action.ogg",
+          "encoded_sha256": "4fc42c3e8e2b287b0ded43e25733603b06e86b6f932a38826da7e2de5f57156f",
+          "matches_current": true
+        }
+      ],
+      "title": "Japoi 3 / Koto with Shakuhachi",
+      "composer": "Tozan",
+      "source_url": "https://opengameart.org/content/midi-pack-1-24-new-tunes",
+      "license": "CC0 1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "credit": "\"Japoi 3 / Koto with Shakuhachi\" — Tozan. Midi Pack 1 — 24 New Tunes, OpenGameArt. CC0 1.0.",
+      "source_kind": "cc0_recording",
+      "collection": "Midi Pack 1 — 24 New Tunes",
+      "source_id": "Midi Pack 1 — 24 New Tunes"
+    },
+    {
+      "file": "page_0_boss.wav",
+      "page": 0,
+      "kind": "boss",
+      "roles": [
+        "page_0_boss",
+        "boss_moon_compass",
+        "boss_baby_face_giant",
+        "boss_cloud_kite"
+      ],
+      "encoded_sha256": "180f10bfb89679298cbaf2e9314d26af9f19fa77d40741266851433c6319addd",
+      "bytes": 557096,
+      "sample_rate": 22050,
+      "channels": 1,
+      "duration_seconds": 12.631565,
+      "duration_source": "libsndfile source frames",
+      "decoded_sample_rate": 22050,
+      "decoded_channels": 2,
+      "decoded_pcm_sha256": "c6b80879b0a93aefc4f83ef6aa4bdf32037f873c83719cb4ad8940c2cb6b038c",
+      "decoded_rms": 0.02821299,
+      "decoded_peak": 0.33654785,
+      "audio_edits": [],
+      "unchanged_from_first_version": true,
+      "historical_proofs": [
+        {
+          "bundle": "MARGINBORN-macOS-0.9.zip",
+          "version": "0.9",
+          "bundle_sha256": "9c3c6b7530fb5b3e2cb0287866e03f5758522b21abf3a6846b359b6c0b428163",
+          "member": "MARGINBORN.app/Contents/Resources/assets/audio/page_0_boss.wav",
+          "encoded_sha256": "180f10bfb89679298cbaf2e9314d26af9f19fa77d40741266851433c6319addd",
+          "matches_current": true
+        },
+        {
+          "bundle": "Turn-the-Page-macOS-0.9.0-beta.zip",
+          "version": "0.9.0-beta",
+          "bundle_sha256": "2e789fed400961a9e10d9d9d5de3d9bfef8b0a130c44ff72b8a80f953aadbc78",
+          "member": "Turn the Page.app/Contents/Resources/assets/audio/page_0_boss.wav",
+          "encoded_sha256": "180f10bfb89679298cbaf2e9314d26af9f19fa77d40741266851433c6319addd",
+          "matches_current": true
+        },
+        {
+          "bundle": "Turn-the-Page-macOS-0.10.0-beta.zip",
+          "version": "0.10.0-beta",
+          "bundle_sha256": "825117b58f752cb9268b073a8ee60dc2569809473bf4d0023ac3b45b70d99e69",
+          "member": "Turn the Page.app/Contents/Resources/assets/audio/page_0_boss.wav",
+          "encoded_sha256": "180f10bfb89679298cbaf2e9314d26af9f19fa77d40741266851433c6319addd",
+          "matches_current": true
+        }
+      ],
+      "title": "Original notebook / Ronin boss",
+      "composer": "Turn the Page original notebook composer",
+      "source_url": null,
+      "source_id": "audio_composer.py:NotebookComposer.score",
+      "license": "Project-original composition; no third-party samples",
+      "license_url": null,
+      "credit": "Original deterministic notebook composition included with the first game release. No third-party samples.",
+      "source_kind": "original_procedural",
+      "composer_file": "audio_composer.py",
+      "composer_function": "NotebookComposer.score"
+    },
+    {
+      "file": "music/page_1_calm.mp3",
+      "page": 1,
+      "kind": "calm",
+      "roles": [
+        "page_1_calm"
+      ],
+      "encoded_sha256": "c78cecf1052e00b3228882bea3fa273720a0c7cd058409f75f19e5bfebf53166",
+      "bytes": 2711943,
+      "sample_rate": 44100,
+      "channels": 2,
+      "duration_seconds": 81.82966,
+      "duration_source": "SDL decoded frames at 22050 Hz stereo",
+      "decoded_sample_rate": 22050,
+      "decoded_channels": 2,
+      "decoded_pcm_sha256": "5aa37f5938db729ab16e4c6bc4193c7253e2c513cbb09a0e6e93db2afc390191",
+      "decoded_rms": 0.1738373,
+      "decoded_peak": 0.96759033,
+      "audio_edits": [],
+      "unchanged_from_first_version": true,
+      "historical_proofs": [
+        {
+          "bundle": "MARGINBORN-macOS-0.9.zip",
+          "version": "0.9",
+          "bundle_sha256": "9c3c6b7530fb5b3e2cb0287866e03f5758522b21abf3a6846b359b6c0b428163",
+          "member": "MARGINBORN.app/Contents/Resources/assets/audio/music/page_1_calm.mp3",
+          "encoded_sha256": "c78cecf1052e00b3228882bea3fa273720a0c7cd058409f75f19e5bfebf53166",
+          "matches_current": true
+        },
+        {
+          "bundle": "Turn-the-Page-macOS-0.9.0-beta.zip",
+          "version": "0.9.0-beta",
+          "bundle_sha256": "2e789fed400961a9e10d9d9d5de3d9bfef8b0a130c44ff72b8a80f953aadbc78",
+          "member": "Turn the Page.app/Contents/Resources/assets/audio/music/page_1_calm.mp3",
+          "encoded_sha256": "c78cecf1052e00b3228882bea3fa273720a0c7cd058409f75f19e5bfebf53166",
+          "matches_current": true
+        },
+        {
+          "bundle": "Turn-the-Page-macOS-0.10.0-beta.zip",
+          "version": "0.10.0-beta",
+          "bundle_sha256": "825117b58f752cb9268b073a8ee60dc2569809473bf4d0023ac3b45b70d99e69",
+          "member": "Turn the Page.app/Contents/Resources/assets/audio/music/page_1_calm.mp3",
+          "encoded_sha256": "c78cecf1052e00b3228882bea3fa273720a0c7cd058409f75f19e5bfebf53166",
+          "matches_current": true
+        }
+      ],
+      "title": "Desert Theme",
+      "composer": "Umplix",
+      "source_url": "https://opengameart.org/content/wild-west-music",
+      "license": "CC0 1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "credit": "\"Desert Theme\" — Umplix. Wild West Music, OpenGameArt. CC0 1.0.",
+      "source_kind": "cc0_recording",
+      "collection": "Wild West Music",
+      "source_id": "Wild West Music"
+    },
+    {
+      "file": "music/page_1_action.mp3",
+      "page": 1,
+      "kind": "action",
+      "roles": [
+        "page_1_action"
+      ],
+      "encoded_sha256": "3adf58f5f0056ed8e25372e066845e56b5955afa771232237ea28d3dd049d473",
+      "bytes": 3339818,
+      "sample_rate": 44100,
+      "channels": 2,
+      "duration_seconds": 102.649252,
+      "duration_source": "SDL decoded frames at 22050 Hz stereo",
+      "decoded_sample_rate": 22050,
+      "decoded_channels": 2,
+      "decoded_pcm_sha256": "89d73b7b560b74255396e50851cf43044cc9cc3ce5c0a0a088dd6c42a133a72d",
+      "decoded_rms": 0.14752473,
+      "decoded_peak": 0.97808838,
+      "audio_edits": [],
+      "unchanged_from_first_version": true,
+      "historical_proofs": [
+        {
+          "bundle": "MARGINBORN-macOS-0.9.zip",
+          "version": "0.9",
+          "bundle_sha256": "9c3c6b7530fb5b3e2cb0287866e03f5758522b21abf3a6846b359b6c0b428163",
+          "member": "MARGINBORN.app/Contents/Resources/assets/audio/music/page_1_action.mp3",
+          "encoded_sha256": "3adf58f5f0056ed8e25372e066845e56b5955afa771232237ea28d3dd049d473",
+          "matches_current": true
+        },
+        {
+          "bundle": "Turn-the-Page-macOS-0.9.0-beta.zip",
+          "version": "0.9.0-beta",
+          "bundle_sha256": "2e789fed400961a9e10d9d9d5de3d9bfef8b0a130c44ff72b8a80f953aadbc78",
+          "member": "Turn the Page.app/Contents/Resources/assets/audio/music/page_1_action.mp3",
+          "encoded_sha256": "3adf58f5f0056ed8e25372e066845e56b5955afa771232237ea28d3dd049d473",
+          "matches_current": true
+        },
+        {
+          "bundle": "Turn-the-Page-macOS-0.10.0-beta.zip",
+          "version": "0.10.0-beta",
+          "bundle_sha256": "825117b58f752cb9268b073a8ee60dc2569809473bf4d0023ac3b45b70d99e69",
+          "member": "Turn the Page.app/Contents/Resources/assets/audio/music/page_1_action.mp3",
+          "encoded_sha256": "3adf58f5f0056ed8e25372e066845e56b5955afa771232237ea28d3dd049d473",
+          "matches_current": true
+        }
+      ],
+      "title": "The Cowboy's Theme",
+      "composer": "Umplix",
+      "source_url": "https://opengameart.org/content/wild-west-music",
+      "license": "CC0 1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "credit": "\"The Cowboy's Theme\" — Umplix. Wild West Music, OpenGameArt. CC0 1.0.",
+      "source_kind": "cc0_recording",
+      "collection": "Wild West Music",
+      "source_id": "Wild West Music"
+    },
+    {
+      "file": "page_1_boss.wav",
+      "page": 1,
+      "kind": "boss",
+      "roles": [
+        "page_1_boss",
+        "boss_wanted_sketch",
+        "boss_railroad_stapler"
+      ],
+      "encoded_sha256": "b91112ead9ae4980375a9a626afeaeaefb2164461617fe61f8277a82b1229673",
+      "bytes": 392044,
+      "sample_rate": 22050,
+      "channels": 1,
+      "duration_seconds": 8.888889,
+      "duration_source": "libsndfile source frames",
+      "decoded_sample_rate": 22050,
+      "decoded_channels": 2,
+      "decoded_pcm_sha256": "44f28557ae4535ebac3bc041135f6b8f4c3bba70b5b5c4a615fa99dd02fc752b",
+      "decoded_rms": 0.03804655,
+      "decoded_peak": 0.28295898,
+      "audio_edits": [],
+      "unchanged_from_first_version": true,
+      "historical_proofs": [
+        {
+          "bundle": "MARGINBORN-macOS-0.9.zip",
+          "version": "0.9",
+          "bundle_sha256": "9c3c6b7530fb5b3e2cb0287866e03f5758522b21abf3a6846b359b6c0b428163",
+          "member": "MARGINBORN.app/Contents/Resources/assets/audio/page_1_boss.wav",
+          "encoded_sha256": "b91112ead9ae4980375a9a626afeaeaefb2164461617fe61f8277a82b1229673",
+          "matches_current": true
+        },
+        {
+          "bundle": "Turn-the-Page-macOS-0.9.0-beta.zip",
+          "version": "0.9.0-beta",
+          "bundle_sha256": "2e789fed400961a9e10d9d9d5de3d9bfef8b0a130c44ff72b8a80f953aadbc78",
+          "member": "Turn the Page.app/Contents/Resources/assets/audio/page_1_boss.wav",
+          "encoded_sha256": "b91112ead9ae4980375a9a626afeaeaefb2164461617fe61f8277a82b1229673",
+          "matches_current": true
+        },
+        {
+          "bundle": "Turn-the-Page-macOS-0.10.0-beta.zip",
+          "version": "0.10.0-beta",
+          "bundle_sha256": "825117b58f752cb9268b073a8ee60dc2569809473bf4d0023ac3b45b70d99e69",
+          "member": "Turn the Page.app/Contents/Resources/assets/audio/page_1_boss.wav",
+          "encoded_sha256": "b91112ead9ae4980375a9a626afeaeaefb2164461617fe61f8277a82b1229673",
+          "matches_current": true
+        }
+      ],
+      "title": "Original notebook / Western boss",
+      "composer": "Turn the Page original notebook composer",
+      "source_url": null,
+      "source_id": "audio_composer.py:NotebookComposer.score",
+      "license": "Project-original composition; no third-party samples",
+      "license_url": null,
+      "credit": "Original deterministic notebook composition included with the first game release. No third-party samples.",
+      "source_kind": "original_procedural",
+      "composer_file": "audio_composer.py",
+      "composer_function": "NotebookComposer.score"
+    },
+    {
+      "file": "music/page_2_calm.mp3",
+      "page": 2,
+      "kind": "calm",
+      "roles": [
+        "page_2_calm"
+      ],
+      "encoded_sha256": "2880297bb0bace79448ea47732aa7db78ea526663ce2791d733e353b6f8adf87",
+      "bytes": 2559999,
+      "sample_rate": 44100,
+      "channels": 2,
+      "duration_seconds": 64.0,
+      "duration_source": "SDL decoded frames at 22050 Hz stereo",
+      "decoded_sample_rate": 22050,
+      "decoded_channels": 2,
+      "decoded_pcm_sha256": "beda3bdc80c36fd096d3d752bcf69ef1b5117ed79d7d77f487690189ef204475",
+      "decoded_rms": 0.00993021,
+      "decoded_peak": 0.05609131,
+      "audio_edits": [],
+      "unchanged_from_first_version": true,
+      "historical_proofs": [
+        {
+          "bundle": "MARGINBORN-macOS-0.9.zip",
+          "version": "0.9",
+          "bundle_sha256": "9c3c6b7530fb5b3e2cb0287866e03f5758522b21abf3a6846b359b6c0b428163",
+          "member": "MARGINBORN.app/Contents/Resources/assets/audio/music/page_2_calm.mp3",
+          "encoded_sha256": "2880297bb0bace79448ea47732aa7db78ea526663ce2791d733e353b6f8adf87",
+          "matches_current": true
+        },
+        {
+          "bundle": "Turn-the-Page-macOS-0.9.0-beta.zip",
+          "version": "0.9.0-beta",
+          "bundle_sha256": "2e789fed400961a9e10d9d9d5de3d9bfef8b0a130c44ff72b8a80f953aadbc78",
+          "member": "Turn the Page.app/Contents/Resources/assets/audio/music/page_2_calm.mp3",
+          "encoded_sha256": "2880297bb0bace79448ea47732aa7db78ea526663ce2791d733e353b6f8adf87",
+          "matches_current": true
+        },
+        {
+          "bundle": "Turn-the-Page-macOS-0.10.0-beta.zip",
+          "version": "0.10.0-beta",
+          "bundle_sha256": "825117b58f752cb9268b073a8ee60dc2569809473bf4d0023ac3b45b70d99e69",
+          "member": "Turn the Page.app/Contents/Resources/assets/audio/music/page_2_calm.mp3",
+          "encoded_sha256": "2880297bb0bace79448ea47732aa7db78ea526663ce2791d733e353b6f8adf87",
+          "matches_current": true
+        }
+      ],
+      "title": "Airy",
+      "composer": "SRG774",
+      "source_url": "https://opengameart.org/content/dark-sci-fi-audio-pack",
+      "license": "CC0 1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "credit": "\"Airy\" — SRG774. Dark Sci-Fi Audio Pack, OpenGameArt. CC0 1.0.",
+      "source_kind": "cc0_recording",
+      "collection": "Dark Sci-Fi Audio Pack",
+      "source_id": "Dark Sci-Fi Audio Pack"
+    },
+    {
+      "file": "music/page_2_action.mp3",
+      "page": 2,
+      "kind": "action",
+      "roles": [
+        "page_2_action"
+      ],
+      "encoded_sha256": "4aba1f1a01f328e0337a3764eb89d8d69e13ea2a86929840c787f4d736565b82",
+      "bytes": 2275786,
+      "sample_rate": 44100,
+      "channels": 2,
+      "duration_seconds": 56.894694,
+      "duration_source": "SDL decoded frames at 22050 Hz stereo",
+      "decoded_sample_rate": 22050,
+      "decoded_channels": 2,
+      "decoded_pcm_sha256": "861b7514dbbad944b9062e8d9776c8c5a92aaff6715506047bd9bf5646357a88",
+      "decoded_rms": 0.00589155,
+      "decoded_peak": 0.05984497,
+      "audio_edits": [],
+      "unchanged_from_first_version": true,
+      "historical_proofs": [
+        {
+          "bundle": "MARGINBORN-macOS-0.9.zip",
+          "version": "0.9",
+          "bundle_sha256": "9c3c6b7530fb5b3e2cb0287866e03f5758522b21abf3a6846b359b6c0b428163",
+          "member": "MARGINBORN.app/Contents/Resources/assets/audio/music/page_2_action.mp3",
+          "encoded_sha256": "4aba1f1a01f328e0337a3764eb89d8d69e13ea2a86929840c787f4d736565b82",
+          "matches_current": true
+        },
+        {
+          "bundle": "Turn-the-Page-macOS-0.9.0-beta.zip",
+          "version": "0.9.0-beta",
+          "bundle_sha256": "2e789fed400961a9e10d9d9d5de3d9bfef8b0a130c44ff72b8a80f953aadbc78",
+          "member": "Turn the Page.app/Contents/Resources/assets/audio/music/page_2_action.mp3",
+          "encoded_sha256": "4aba1f1a01f328e0337a3764eb89d8d69e13ea2a86929840c787f4d736565b82",
+          "matches_current": true
+        },
+        {
+          "bundle": "Turn-the-Page-macOS-0.10.0-beta.zip",
+          "version": "0.10.0-beta",
+          "bundle_sha256": "825117b58f752cb9268b073a8ee60dc2569809473bf4d0023ac3b45b70d99e69",
+          "member": "Turn the Page.app/Contents/Resources/assets/audio/music/page_2_action.mp3",
+          "encoded_sha256": "4aba1f1a01f328e0337a3764eb89d8d69e13ea2a86929840c787f4d736565b82",
+          "matches_current": true
+        }
+      ],
+      "title": "Urgent",
+      "composer": "SRG774",
+      "source_url": "https://opengameart.org/content/dark-sci-fi-audio-pack",
+      "license": "CC0 1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "credit": "\"Urgent\" — SRG774. Dark Sci-Fi Audio Pack, OpenGameArt. CC0 1.0.",
+      "source_kind": "cc0_recording",
+      "collection": "Dark Sci-Fi Audio Pack",
+      "source_id": "Dark Sci-Fi Audio Pack"
+    },
+    {
+      "file": "page_2_boss.wav",
+      "page": 2,
+      "kind": "boss",
+      "roles": [
+        "page_2_boss",
+        "boss_orbital_mistake"
+      ],
+      "encoded_sha256": "0f2f778fab8e32b22bef46c5d8a28746605d0f50568745cf2cfaf26b901daa96",
+      "bytes": 622632,
+      "sample_rate": 22050,
+      "channels": 1,
+      "duration_seconds": 14.117642,
+      "duration_source": "libsndfile source frames",
+      "decoded_sample_rate": 22050,
+      "decoded_channels": 2,
+      "decoded_pcm_sha256": "17b3d54466d471d82976fa028ce31acf3db5262bea503267bdda2ca22dbd15fc",
+      "decoded_rms": 0.03026603,
+      "decoded_peak": 0.30862427,
+      "audio_edits": [],
+      "unchanged_from_first_version": true,
+      "historical_proofs": [
+        {
+          "bundle": "MARGINBORN-macOS-0.9.zip",
+          "version": "0.9",
+          "bundle_sha256": "9c3c6b7530fb5b3e2cb0287866e03f5758522b21abf3a6846b359b6c0b428163",
+          "member": "MARGINBORN.app/Contents/Resources/assets/audio/page_2_boss.wav",
+          "encoded_sha256": "0f2f778fab8e32b22bef46c5d8a28746605d0f50568745cf2cfaf26b901daa96",
+          "matches_current": true
+        },
+        {
+          "bundle": "Turn-the-Page-macOS-0.9.0-beta.zip",
+          "version": "0.9.0-beta",
+          "bundle_sha256": "2e789fed400961a9e10d9d9d5de3d9bfef8b0a130c44ff72b8a80f953aadbc78",
+          "member": "Turn the Page.app/Contents/Resources/assets/audio/page_2_boss.wav",
+          "encoded_sha256": "0f2f778fab8e32b22bef46c5d8a28746605d0f50568745cf2cfaf26b901daa96",
+          "matches_current": true
+        },
+        {
+          "bundle": "Turn-the-Page-macOS-0.10.0-beta.zip",
+          "version": "0.10.0-beta",
+          "bundle_sha256": "825117b58f752cb9268b073a8ee60dc2569809473bf4d0023ac3b45b70d99e69",
+          "member": "Turn the Page.app/Contents/Resources/assets/audio/page_2_boss.wav",
+          "encoded_sha256": "0f2f778fab8e32b22bef46c5d8a28746605d0f50568745cf2cfaf26b901daa96",
+          "matches_current": true
+        }
+      ],
+      "title": "Original notebook / Space boss",
+      "composer": "Turn the Page original notebook composer",
+      "source_url": null,
+      "source_id": "audio_composer.py:NotebookComposer.score",
+      "license": "Project-original composition; no third-party samples",
+      "license_url": null,
+      "credit": "Original deterministic notebook composition included with the first game release. No third-party samples.",
+      "source_kind": "original_procedural",
+      "composer_file": "audio_composer.py",
+      "composer_function": "NotebookComposer.score"
+    },
+    {
+      "file": "page_3_calm.wav",
+      "page": 3,
+      "kind": "calm",
+      "roles": [
+        "page_3_calm"
+      ],
+      "encoded_sha256": "00ff8e6e2d4fabeabe1fd63c6172486f4052b96b7d79b50b089d955684221b9e",
+      "bytes": 641498,
+      "sample_rate": 22050,
+      "channels": 1,
+      "duration_seconds": 14.545442,
+      "duration_source": "libsndfile source frames",
+      "decoded_sample_rate": 22050,
+      "decoded_channels": 2,
+      "decoded_pcm_sha256": "d6620fad1c789f7c1040e97039b9c2c7f99d9d062f59666c3aea5246d2ba6896",
+      "decoded_rms": 0.01912463,
+      "decoded_peak": 0.09402466,
+      "audio_edits": [],
+      "unchanged_from_first_version": true,
+      "historical_proofs": [
+        {
+          "bundle": "MARGINBORN-macOS-0.9.zip",
+          "version": "0.9",
+          "bundle_sha256": "9c3c6b7530fb5b3e2cb0287866e03f5758522b21abf3a6846b359b6c0b428163",
+          "member": "MARGINBORN.app/Contents/Resources/assets/audio/page_3_calm.wav",
+          "encoded_sha256": "00ff8e6e2d4fabeabe1fd63c6172486f4052b96b7d79b50b089d955684221b9e",
+          "matches_current": true
+        },
+        {
+          "bundle": "Turn-the-Page-macOS-0.9.0-beta.zip",
+          "version": "0.9.0-beta",
+          "bundle_sha256": "2e789fed400961a9e10d9d9d5de3d9bfef8b0a130c44ff72b8a80f953aadbc78",
+          "member": "Turn the Page.app/Contents/Resources/assets/audio/page_3_calm.wav",
+          "encoded_sha256": "00ff8e6e2d4fabeabe1fd63c6172486f4052b96b7d79b50b089d955684221b9e",
+          "matches_current": true
+        },
+        {
+          "bundle": "Turn-the-Page-macOS-0.10.0-beta.zip",
+          "version": "0.10.0-beta",
+          "bundle_sha256": "825117b58f752cb9268b073a8ee60dc2569809473bf4d0023ac3b45b70d99e69",
+          "member": "Turn the Page.app/Contents/Resources/assets/audio/page_3_calm.wav",
+          "encoded_sha256": "00ff8e6e2d4fabeabe1fd63c6172486f4052b96b7d79b50b089d955684221b9e",
+          "matches_current": true
+        }
+      ],
+      "title": "Original notebook / Agent calm",
+      "composer": "Turn the Page original notebook composer",
+      "source_url": null,
+      "source_id": "audio_composer.py:NotebookComposer.score",
+      "license": "Project-original composition; no third-party samples",
+      "license_url": null,
+      "credit": "Original deterministic notebook composition included with the first game release. No third-party samples.",
+      "source_kind": "original_procedural",
+      "composer_file": "audio_composer.py",
+      "composer_function": "NotebookComposer.score"
+    },
+    {
+      "file": "page_3_action.wav",
+      "page": 3,
+      "kind": "action",
+      "roles": [
+        "page_3_action"
+      ],
+      "encoded_sha256": "83a654a6e6ce2b4eb8cba1a21987cda74203a2d22d94e8e886b392e667222acd",
+      "bytes": 641498,
+      "sample_rate": 22050,
+      "channels": 1,
+      "duration_seconds": 14.545442,
+      "duration_source": "libsndfile source frames",
+      "decoded_sample_rate": 22050,
+      "decoded_channels": 2,
+      "decoded_pcm_sha256": "b1b8de1e9af91ff6f38c9742a280a09486a6fdfc3f667fac2abbe432d9a83d52",
+      "decoded_rms": 0.02911688,
+      "decoded_peak": 0.18652344,
+      "audio_edits": [],
+      "unchanged_from_first_version": true,
+      "historical_proofs": [
+        {
+          "bundle": "MARGINBORN-macOS-0.9.zip",
+          "version": "0.9",
+          "bundle_sha256": "9c3c6b7530fb5b3e2cb0287866e03f5758522b21abf3a6846b359b6c0b428163",
+          "member": "MARGINBORN.app/Contents/Resources/assets/audio/page_3_action.wav",
+          "encoded_sha256": "83a654a6e6ce2b4eb8cba1a21987cda74203a2d22d94e8e886b392e667222acd",
+          "matches_current": true
+        },
+        {
+          "bundle": "Turn-the-Page-macOS-0.9.0-beta.zip",
+          "version": "0.9.0-beta",
+          "bundle_sha256": "2e789fed400961a9e10d9d9d5de3d9bfef8b0a130c44ff72b8a80f953aadbc78",
+          "member": "Turn the Page.app/Contents/Resources/assets/audio/page_3_action.wav",
+          "encoded_sha256": "83a654a6e6ce2b4eb8cba1a21987cda74203a2d22d94e8e886b392e667222acd",
+          "matches_current": true
+        },
+        {
+          "bundle": "Turn-the-Page-macOS-0.10.0-beta.zip",
+          "version": "0.10.0-beta",
+          "bundle_sha256": "825117b58f752cb9268b073a8ee60dc2569809473bf4d0023ac3b45b70d99e69",
+          "member": "Turn the Page.app/Contents/Resources/assets/audio/page_3_action.wav",
+          "encoded_sha256": "83a654a6e6ce2b4eb8cba1a21987cda74203a2d22d94e8e886b392e667222acd",
+          "matches_current": true
+        }
+      ],
+      "title": "Original notebook / Agent action",
+      "composer": "Turn the Page original notebook composer",
+      "source_url": null,
+      "source_id": "audio_composer.py:NotebookComposer.score",
+      "license": "Project-original composition; no third-party samples",
+      "license_url": null,
+      "credit": "Original deterministic notebook composition included with the first game release. No third-party samples.",
+      "source_kind": "original_procedural",
+      "composer_file": "audio_composer.py",
+      "composer_function": "NotebookComposer.score"
+    },
+    {
+      "file": "page_3_boss.wav",
+      "page": 3,
+      "kind": "boss",
+      "roles": [
+        "page_3_boss",
+        "boss_scissor_director"
+      ],
+      "encoded_sha256": "608b9290dcc1d2e7addf4f7a9a00cee4ceda1353ded4a7abbbac0c7097648ef8",
+      "bytes": 641498,
+      "sample_rate": 22050,
+      "channels": 1,
+      "duration_seconds": 14.545442,
+      "duration_source": "libsndfile source frames",
+      "decoded_sample_rate": 22050,
+      "decoded_channels": 2,
+      "decoded_pcm_sha256": "7a34babadf662574c7d571bf2752160034c39cf424034def3b4688e830ba6d3b",
+      "decoded_rms": 0.02998905,
+      "decoded_peak": 0.30300903,
+      "audio_edits": [],
+      "unchanged_from_first_version": true,
+      "historical_proofs": [
+        {
+          "bundle": "MARGINBORN-macOS-0.9.zip",
+          "version": "0.9",
+          "bundle_sha256": "9c3c6b7530fb5b3e2cb0287866e03f5758522b21abf3a6846b359b6c0b428163",
+          "member": "MARGINBORN.app/Contents/Resources/assets/audio/page_3_boss.wav",
+          "encoded_sha256": "608b9290dcc1d2e7addf4f7a9a00cee4ceda1353ded4a7abbbac0c7097648ef8",
+          "matches_current": true
+        },
+        {
+          "bundle": "Turn-the-Page-macOS-0.9.0-beta.zip",
+          "version": "0.9.0-beta",
+          "bundle_sha256": "2e789fed400961a9e10d9d9d5de3d9bfef8b0a130c44ff72b8a80f953aadbc78",
+          "member": "Turn the Page.app/Contents/Resources/assets/audio/page_3_boss.wav",
+          "encoded_sha256": "608b9290dcc1d2e7addf4f7a9a00cee4ceda1353ded4a7abbbac0c7097648ef8",
+          "matches_current": true
+        },
+        {
+          "bundle": "Turn-the-Page-macOS-0.10.0-beta.zip",
+          "version": "0.10.0-beta",
+          "bundle_sha256": "825117b58f752cb9268b073a8ee60dc2569809473bf4d0023ac3b45b70d99e69",
+          "member": "Turn the Page.app/Contents/Resources/assets/audio/page_3_boss.wav",
+          "encoded_sha256": "608b9290dcc1d2e7addf4f7a9a00cee4ceda1353ded4a7abbbac0c7097648ef8",
+          "matches_current": true
+        }
+      ],
+      "title": "Original notebook / Agent boss",
+      "composer": "Turn the Page original notebook composer",
+      "source_url": null,
+      "source_id": "audio_composer.py:NotebookComposer.score",
+      "license": "Project-original composition; no third-party samples",
+      "license_url": null,
+      "credit": "Original deterministic notebook composition included with the first game release. No third-party samples.",
+      "source_kind": "original_procedural",
+      "composer_file": "audio_composer.py",
+      "composer_function": "NotebookComposer.score"
+    },
+    {
+      "file": "page_4_calm.wav",
+      "page": 4,
+      "kind": "calm",
+      "roles": [
+        "page_4_calm"
+      ],
+      "encoded_sha256": "3e2cefcde16080ab821b3ca79648a6e4e1fc82ad061dc5a16f83ee164b2b7a7f",
+      "bytes": 557096,
+      "sample_rate": 22050,
+      "channels": 1,
+      "duration_seconds": 12.631565,
+      "duration_source": "libsndfile source frames",
+      "decoded_sample_rate": 22050,
+      "decoded_channels": 2,
+      "decoded_pcm_sha256": "689cbdac6c06f043bf3e741c6ff5865d58ae02f8b888c8ab33158ed57d999477",
+      "decoded_rms": 0.01894168,
+      "decoded_peak": 0.0949707,
+      "audio_edits": [],
+      "unchanged_from_first_version": true,
+      "historical_proofs": [
+        {
+          "bundle": "MARGINBORN-macOS-0.9.zip",
+          "version": "0.9",
+          "bundle_sha256": "9c3c6b7530fb5b3e2cb0287866e03f5758522b21abf3a6846b359b6c0b428163",
+          "member": "MARGINBORN.app/Contents/Resources/assets/audio/page_4_calm.wav",
+          "encoded_sha256": "3e2cefcde16080ab821b3ca79648a6e4e1fc82ad061dc5a16f83ee164b2b7a7f",
+          "matches_current": true
+        },
+        {
+          "bundle": "Turn-the-Page-macOS-0.9.0-beta.zip",
+          "version": "0.9.0-beta",
+          "bundle_sha256": "2e789fed400961a9e10d9d9d5de3d9bfef8b0a130c44ff72b8a80f953aadbc78",
+          "member": "Turn the Page.app/Contents/Resources/assets/audio/page_4_calm.wav",
+          "encoded_sha256": "3e2cefcde16080ab821b3ca79648a6e4e1fc82ad061dc5a16f83ee164b2b7a7f",
+          "matches_current": true
+        },
+        {
+          "bundle": "Turn-the-Page-macOS-0.10.0-beta.zip",
+          "version": "0.10.0-beta",
+          "bundle_sha256": "825117b58f752cb9268b073a8ee60dc2569809473bf4d0023ac3b45b70d99e69",
+          "member": "Turn the Page.app/Contents/Resources/assets/audio/page_4_calm.wav",
+          "encoded_sha256": "3e2cefcde16080ab821b3ca79648a6e4e1fc82ad061dc5a16f83ee164b2b7a7f",
+          "matches_current": true
+        }
+      ],
+      "title": "Original notebook / Final page calm",
+      "composer": "Turn the Page original notebook composer",
+      "source_url": null,
+      "source_id": "audio_composer.py:NotebookComposer.score",
+      "license": "Project-original composition; no third-party samples",
+      "license_url": null,
+      "credit": "Original deterministic notebook composition included with the first game release. No third-party samples.",
+      "source_kind": "original_procedural",
+      "composer_file": "audio_composer.py",
+      "composer_function": "NotebookComposer.score"
+    },
+    {
+      "file": "page_4_action.wav",
+      "page": 4,
+      "kind": "action",
+      "roles": [
+        "page_4_action"
+      ],
+      "encoded_sha256": "b7840b2c9894da90b751053c3fe85be451d63bb103338eed9f77497d0d527d26",
+      "bytes": 557096,
+      "sample_rate": 22050,
+      "channels": 1,
+      "duration_seconds": 12.631565,
+      "duration_source": "libsndfile source frames",
+      "decoded_sample_rate": 22050,
+      "decoded_channels": 2,
+      "decoded_pcm_sha256": "049ddf1bd23a9d20154fe800419aa5de1db8d9acfc5c54c267799ef1589d63fd",
+      "decoded_rms": 0.02863427,
+      "decoded_peak": 0.17700195,
+      "audio_edits": [],
+      "unchanged_from_first_version": true,
+      "historical_proofs": [
+        {
+          "bundle": "MARGINBORN-macOS-0.9.zip",
+          "version": "0.9",
+          "bundle_sha256": "9c3c6b7530fb5b3e2cb0287866e03f5758522b21abf3a6846b359b6c0b428163",
+          "member": "MARGINBORN.app/Contents/Resources/assets/audio/page_4_action.wav",
+          "encoded_sha256": "b7840b2c9894da90b751053c3fe85be451d63bb103338eed9f77497d0d527d26",
+          "matches_current": true
+        },
+        {
+          "bundle": "Turn-the-Page-macOS-0.9.0-beta.zip",
+          "version": "0.9.0-beta",
+          "bundle_sha256": "2e789fed400961a9e10d9d9d5de3d9bfef8b0a130c44ff72b8a80f953aadbc78",
+          "member": "Turn the Page.app/Contents/Resources/assets/audio/page_4_action.wav",
+          "encoded_sha256": "b7840b2c9894da90b751053c3fe85be451d63bb103338eed9f77497d0d527d26",
+          "matches_current": true
+        },
+        {
+          "bundle": "Turn-the-Page-macOS-0.10.0-beta.zip",
+          "version": "0.10.0-beta",
+          "bundle_sha256": "825117b58f752cb9268b073a8ee60dc2569809473bf4d0023ac3b45b70d99e69",
+          "member": "Turn the Page.app/Contents/Resources/assets/audio/page_4_action.wav",
+          "encoded_sha256": "b7840b2c9894da90b751053c3fe85be451d63bb103338eed9f77497d0d527d26",
+          "matches_current": true
+        }
+      ],
+      "title": "Original notebook / Final page action",
+      "composer": "Turn the Page original notebook composer",
+      "source_url": null,
+      "source_id": "audio_composer.py:NotebookComposer.score",
+      "license": "Project-original composition; no third-party samples",
+      "license_url": null,
+      "credit": "Original deterministic notebook composition included with the first game release. No third-party samples.",
+      "source_kind": "original_procedural",
+      "composer_file": "audio_composer.py",
+      "composer_function": "NotebookComposer.score"
+    },
+    {
+      "file": "page_4_boss.wav",
+      "page": 4,
+      "kind": "boss",
+      "roles": [
+        "page_4_boss",
+        "boss_final_editor"
+      ],
+      "encoded_sha256": "c548af56193bc3eb7099724843d09086f89961facb80fd3d02216ee53a166c2a",
+      "bytes": 557096,
+      "sample_rate": 22050,
+      "channels": 1,
+      "duration_seconds": 12.631565,
+      "duration_source": "libsndfile source frames",
+      "decoded_sample_rate": 22050,
+      "decoded_channels": 2,
+      "decoded_pcm_sha256": "bf42188b34dbbb5b51158dfca12e84a15082d04fb79f0bd71bad9a0afeeee360",
+      "decoded_rms": 0.03130713,
+      "decoded_peak": 0.32339478,
+      "audio_edits": [],
+      "unchanged_from_first_version": true,
+      "historical_proofs": [
+        {
+          "bundle": "MARGINBORN-macOS-0.9.zip",
+          "version": "0.9",
+          "bundle_sha256": "9c3c6b7530fb5b3e2cb0287866e03f5758522b21abf3a6846b359b6c0b428163",
+          "member": "MARGINBORN.app/Contents/Resources/assets/audio/page_4_boss.wav",
+          "encoded_sha256": "c548af56193bc3eb7099724843d09086f89961facb80fd3d02216ee53a166c2a",
+          "matches_current": true
+        },
+        {
+          "bundle": "Turn-the-Page-macOS-0.9.0-beta.zip",
+          "version": "0.9.0-beta",
+          "bundle_sha256": "2e789fed400961a9e10d9d9d5de3d9bfef8b0a130c44ff72b8a80f953aadbc78",
+          "member": "Turn the Page.app/Contents/Resources/assets/audio/page_4_boss.wav",
+          "encoded_sha256": "c548af56193bc3eb7099724843d09086f89961facb80fd3d02216ee53a166c2a",
+          "matches_current": true
+        },
+        {
+          "bundle": "Turn-the-Page-macOS-0.10.0-beta.zip",
+          "version": "0.10.0-beta",
+          "bundle_sha256": "825117b58f752cb9268b073a8ee60dc2569809473bf4d0023ac3b45b70d99e69",
+          "member": "Turn the Page.app/Contents/Resources/assets/audio/page_4_boss.wav",
+          "encoded_sha256": "c548af56193bc3eb7099724843d09086f89961facb80fd3d02216ee53a166c2a",
+          "matches_current": true
+        }
+      ],
+      "title": "Original notebook / Final page boss",
+      "composer": "Turn the Page original notebook composer",
+      "source_url": null,
+      "source_id": "audio_composer.py:NotebookComposer.score",
+      "license": "Project-original composition; no third-party samples",
+      "license_url": null,
+      "credit": "Original deterministic notebook composition included with the first game release. No third-party samples.",
+      "source_kind": "original_procedural",
+      "composer_file": "audio_composer.py",
+      "composer_function": "NotebookComposer.score"
+    }
+  ],
+  "verification": {
+    "selected_unique_files": 15,
+    "historical_file_comparisons": 45,
+    "all_historical_hashes_match": true,
+    "audio_files_modified": false
+  }
+}

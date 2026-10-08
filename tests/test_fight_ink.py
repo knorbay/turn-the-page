@@ -118,8 +118,10 @@ class FightInkTests(unittest.TestCase):
 
     def test_collection_applies_immediately_and_health_is_visible_outside_fights(self):
         self.game.level.discover_secret("last_homework","unused caption")
-        self.assertEqual(self.player.sketch_dash_recovery,.10)
-        self.assertIn("REVISION RHYTHM",self.game.level.toast)
+        self.assertEqual(self.player.sketch_dash_recovery,.14)
+        self.assertIn("Lost Sketches",self.game.level.toast)
+        self.assertIn("across pages",self.game.level.toast)
+        self.assertIn("last_homework",self.game.save.data["secrets"])
         surface=pygame.Surface((WIDTH,HEIGHT))
         surface.fill((0,0,0))
         full=draw_health(surface,self.game.renderer,self.player,0)

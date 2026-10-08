@@ -53,10 +53,10 @@ class PageArsenalContracts(unittest.TestCase):
         restored.restore(checkpoint)
         self.assertEqual(restored.current.mag_size,6)
         self.assertEqual(restored.current.ammo,2)
-        self.assertEqual(restored.unlocked,{"pencil_blade","ink_pistol"})
+        self.assertEqual(restored.unlocked,{"ink_pistol"})
         restored.configure_page(3)
         self.assertEqual(restored.current.mag_size,8)
-        self.assertEqual(restored.unlocked,{"pencil_blade","ink_pistol"})
+        self.assertEqual(restored.unlocked,{"ink_pistol"})
         self.assertEqual(restored.label_for(),"SUPPRESSED PISTOL")
 
     def test_western_revolver_and_agent_pistol_change_actual_fire_rhythm(self):
@@ -268,7 +268,7 @@ class PageArsenalContracts(unittest.TestCase):
             self.assertTrue(surface.get_bounding_rect().width)
         self.assertEqual(len(set(signatures)),5)
 
-    def test_inventory_draws_only_earned_allowed_silhouettes_without_slot_numbers(self):
+    def test_inventory_draws_current_earned_silhouette_and_contextual_switch_hint(self):
         system,ctx=self.setup_weapon(1,"pencil_blade")
         system.set_page_loadout(("pencil_blade","ink_pistol","marker_shotgun"))
         surface=pygame.Surface((1120,700))
@@ -277,13 +277,17 @@ class PageArsenalContracts(unittest.TestCase):
         with patch.object(system,"draw_icon") as icon:
             system.draw_hud(surface,renderer)
             self.assertEqual([c.args[1] for c in icon.call_args_list],["pencil_blade"])
-            self.assertNotIn("Q / wheel",calls)
+            self.assertFalse(any("Q / wheel" in text for text in calls))
             system.unlock("eraser_cannon")
             system.unlock("ink_pistol")
             icon.reset_mock();calls.clear()
             system.draw_hud(surface,renderer)
-            self.assertEqual([c.args[1] for c in icon.call_args_list],["pencil_blade","ink_pistol"])
-            self.assertIn("Q / wheel",calls)
+            self.assertEqual([c.args[1] for c in icon.call_args_list],["pencil_blade"])
+            self.assertTrue(any("Q / wheel" in text for text in calls))
+            system.tool_hint_time=0
+            calls.clear()
+            system.draw_hud(surface,renderer)
+            self.assertFalse(any("Q / wheel" in text for text in calls))
             self.assertFalse(any(text in ("1","2","3","4","5","6") for text in calls))
 
     def test_page_profiles_keep_signature_sword_attack_exactly_unchanged(self):

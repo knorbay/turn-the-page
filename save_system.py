@@ -10,25 +10,30 @@ from runtime_paths import default_save_path, legacy_save_path
 
 
 DEFAULT_PROGRESS = {
-    "version": 6,
-    "campaign_revision": 2,
+    "version": 7,
+    "campaign_revision": 3,
     "chapter": 0,
     "checkpoint": "start",
     "secrets": [],
+    "optional_bosses": [],
     "completed": False,
     "achievements": [],
     "play_seconds": 0,
-    "weapons": ["pencil_blade"],
-    "current_weapon": "pencil_blade",
+    "weapons": [],
+    "current_weapon": "unarmed",
     "weapon_ammo": {},
     # Facts the Artist can react to.  These are deliberately counters and
     # recent events rather than an exposed morality/personality score.
     "behavior": {},
     "notebook_choices": {},
+    "notebook_tools": {},
+    "artist_adaptation": {},
+    "tutorial": {},
     "settings": {
         "master_volume": 0.8,
         "sfx_volume": 0.85,
         "music_volume": 0.35,
+        "language": "tr",
         "fullscreen": False,
         "window_width": WIDTH,
         "window_height": HEIGHT,
@@ -65,40 +70,71 @@ class SaveSystem:
             raw = json.loads(source.read_text(encoding="utf8"))
         except (OSError, ValueError, TypeError):
             return self.data
-        for key in ("chapter", "checkpoint", "secrets", "completed", "achievements", "play_seconds",
-                    "weapons", "current_weapon", "weapon_ammo", "behavior", "notebook_choices"):
+        if not isinstance(raw, dict):
+            return self.data
+        for key in ("chapter", "checkpoint", "secrets", "optional_bosses", "completed", "achievements", "play_seconds",
+                    "weapons", "current_weapon", "weapon_ammo", "behavior", "notebook_choices", "notebook_tools", "artist_adaptation", "tutorial"):
             if key in raw:
                 self.data[key] = raw[key]
         if isinstance(raw.get("settings"), dict):
             self.data["settings"].update(raw["settings"])
         self._repair_settings()
-        self.data["chapter"] = max(0, min(4, int(self.data["chapter"])))
-        self.data["secrets"] = sorted(set(str(s) for s in self.data["secrets"]))
-        if not isinstance(self.data.get("achievements"), list):
-            self.data["achievements"] = []
-        self.data["achievements"] = sorted(set(str(item)
-                                                   for item in self.data["achievements"]))
+        self.data["chapter"] = min(4, self._nonnegative_int(self.data["chapter"]))
+        if not isinstance(self.data["checkpoint"], str) or not self.data["checkpoint"]:
+            self.data["checkpoint"] = "start"
+        self.data["completed"] = self._boolean(self.data["completed"])
+        self.data["play_seconds"] = self._nonnegative_number(self.data["play_seconds"])
+        for key in ("secrets", "optional_bosses", "achievements"):
+            values = self.data.get(key)
+            self.data[key] = (sorted({value for value in values
+                                     if isinstance(value, str) and value})
+                              if isinstance(values, list) else [])
         if not isinstance(self.data.get("weapons"), list):
-            self.data["weapons"] = ["pencil_blade"]
-        self.data["weapons"] = sorted(set(str(w) for w in self.data["weapons"]) | {"pencil_blade"})
+            self.data["weapons"] = []
+        from weapons import WEAPON_ORDER
+        self.data["weapons"] = sorted({str(w) for w in self.data["weapons"]
+                                       if str(w) in WEAPON_ORDER})
         if self.data.get("current_weapon") not in self.data["weapons"]:
-            self.data["current_weapon"] = "pencil_blade"
+            self.data["current_weapon"] = next(iter(self.data["weapons"]), "unarmed")
         if not isinstance(self.data.get("weapon_ammo"), dict):
             self.data["weapon_ammo"] = {}
-        if not isinstance(self.data.get("behavior"), dict):
-            self.data["behavior"] = {}
-        if raw.get("campaign_revision", 1) < 2 and self.data["chapter"] == 2 and (
+        self.data["weapon_ammo"] = {key: self._nonnegative_int(value)
+                                     for key, value in self.data["weapon_ammo"].items()
+                                     if key in WEAPON_ORDER}
+        for key in ("behavior", "notebook_choices", "notebook_tools", "artist_adaptation", "tutorial"):
+            if not isinstance(self.data.get(key), dict):
+                self.data[key] = {}
+        revision = self._nonnegative_int(raw.get("campaign_revision", 1), fallback=1)
+        if revision < 2 and self.data["chapter"] == 2 and (
                 self.data.get("completed") or self.data["checkpoint"] == "after_final_margin_revision"):
             # Continue an old completed three-page run at the new Agent page.
             # Achievements and collected sketches remain earned.
             self.data.update(chapter=3, checkpoint="start", completed=False,
-                             weapons=["pencil_blade"], current_weapon="pencil_blade",
+                             weapons=[], current_weapon="unarmed",
                              weapon_ammo={})
             self.data["behavior"]["final_scenario"] = ""
         if source != self.path:
             self.write()
             self.read_path = self.path
         return self.data
+
+    @staticmethod
+    def _nonnegative_number(value, fallback=0):
+        try:
+            value = float(value)
+        except (TypeError, ValueError, OverflowError):
+            return fallback
+        return max(0.0, value) if math.isfinite(value) else fallback
+
+    @classmethod
+    def _nonnegative_int(cls, value, fallback=0):
+        return int(cls._nonnegative_number(value, fallback))
+
+    @staticmethod
+    def _boolean(value):
+        if isinstance(value, str):
+            return value.strip().lower() in ("1", "true", "yes", "on")
+        return bool(value) if isinstance(value, (bool, int, float)) else False
 
     @staticmethod
     def _finite_volume(value, fallback):
@@ -128,6 +164,10 @@ class SaveSystem:
         if isinstance(fullscreen, str):
             fullscreen = fullscreen.strip().lower() in ("1", "true", "yes", "on")
         settings["fullscreen"] = bool(fullscreen)
+        language = settings.get("language", "tr")
+        language = language.strip().lower() if isinstance(language, str) else "tr"
+        from localization import normalize_language
+        settings["language"] = normalize_language(language)
         settings["window_width"] = self._window_dimension(
             settings.get("window_width"), WIDTH, 800, 7680,
         )
@@ -185,10 +225,12 @@ class SaveSystem:
         self.write()
 
     def update_combat(self, weapons, current_weapon, ammo=None):
-        self.data["weapons"] = sorted(set(str(item) for item in weapons) | {"pencil_blade"})
+        from weapons import WEAPON_ORDER
+        self.data["weapons"] = sorted({str(item) for item in weapons
+                                       if str(item) in WEAPON_ORDER})
         self.data["current_weapon"] = (str(current_weapon)
                                        if str(current_weapon) in self.data["weapons"]
-                                       else "pencil_blade")
+                                       else next(iter(self.data["weapons"]), "unarmed"))
         if isinstance(ammo, dict):
             self.data["weapon_ammo"] = {str(key): max(0, int(value))
                                         for key, value in ammo.items()}
@@ -199,3 +241,19 @@ class SaveSystem:
         self.data["behavior"] = dict(snapshot) if isinstance(snapshot, dict) else {}
         if write:
             self.write()
+
+
+class TrainingSave(SaveSystem):
+    """An isolated replay lesson never replaces the player's campaign save."""
+    def __init__(self, campaign):
+        self.path = campaign.path
+        self.read_path = self.path
+        self.data = self._fresh()
+        self.data["settings"].update(campaign.data["settings"])
+
+    @property
+    def can_continue(self):
+        return False
+
+    def write(self):
+        pass

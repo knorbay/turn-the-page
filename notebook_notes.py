@@ -9,6 +9,7 @@ from __future__ import annotations
 import math
 import random
 import pygame
+from localization import translate
 
 BLUE = (66, 88, 112)
 GRAPHITE = (101, 98, 86)
@@ -76,7 +77,7 @@ class NotebookAnnotations:
         # Whole words retain natural kerning; their baseline wanders slightly
         # like a real student's handwriting rather than a shaky UI label.
         rng = random.Random(seed)
-        for word in text.translate(PLAIN_GLYPHS).split(" "):
+        for word in translate(text).translate(PLAIN_GLYPHS).split(" "):
             if word == "✓":
                 pygame.draw.lines(surface,color,False,
                                   [(x,y+10),(x+5,y+16),(x+16,y+1)],2)

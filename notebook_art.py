@@ -17,6 +17,9 @@ class NotebookMaterial:
         self.face=pygame.font.match_font('noteworthy,chalkboard,comic sans ms')
         self.font=pygame.font.Font(self.face,20)
         self.small=pygame.font.Font(self.face,15)
+        dialogue_face=pygame.font.match_font('arial,dejavusans,liberationsans')
+        self.dialogue_fonts=[pygame.font.Font(dialogue_face,size) for size in (18,17,16)]
+        self.dialogue_small=pygame.font.Font(dialogue_face,14)
         self.grain=pygame.Surface((WIDTH,HEIGHT),pygame.SRCALPHA)
         rng=random.Random(91)
         for _ in range(5600):
@@ -47,28 +50,63 @@ class NotebookMaterial:
         return s
 
     def hand(self,s,text,pos,color=PENCIL,small=False,seed=1):
+        from localization import translate
+        text = translate(str(text))
         rng=random.Random(seed);x,y=pos;f=self.small if small else self.font
         for word in text.split():
             glyph=f.render(word,True,color)
-            glyph=pygame.transform.rotate(glyph,rng.choice((-2,-1,1,2)))
-            s.blit(glyph,(round(x),round(y+rng.uniform(-2,2))))
+            # Word baselines wander, while the actual letter edges stay sharp.
+            # Rotating every tiny word resampled the strokes into fuzzy grey.
+            s.blit(glyph,(round(x),round(y+rng.choice((-1,0,0,1)))))
             x+=f.size(word+' ')[0]
 
+    def artist_note_layout(self,s,text,reply=''):
+        """Keep live dialogue below the playable road, beside the tool HUD."""
+        from localization import translate
+        text, reply = translate(str(text)), translate(str(reply))
+        # The rightmost 164px are reserved for the spent-dash indicator.
+        width=min(524,s.get_width()-208)
+        body_width=width-24
+        for font in self.dialogue_fonts:
+            lines=[]
+            for paragraph in text.split('\n'):
+                line=''
+                for word in paragraph.split():
+                    candidate=(line+' '+word).strip()
+                    if line and font.size(candidate)[0]>body_width:
+                        lines.append(line);line=word
+                    else:line=candidate
+                lines.append(line)
+            if len(lines)<=3:break
+        # Authored notes fit three rows. Custom long notes retain all content
+        # with further reduced type rather than silently discarding the tail.
+        if len(lines)>3:
+            for size in range(15,11,-1):
+                font=pygame.font.Font(pygame.font.match_font('arial,dejavusans,liberationsans'),size)
+                lines=['']
+                for word in text.split():
+                    candidate=(lines[-1]+' '+word).strip()
+                    if lines[-1] and font.size(candidate)[0]>body_width:lines.append(word)
+                    else:lines[-1]=candidate
+                if len(lines)<=3:break
+        line_height=max(19,font.get_height())
+        height=24+line_height*len(lines)
+        rect=pygame.Rect(s.get_width()-width-184,s.get_height()-96,width,height)
+        return rect,lines,font,translate('the Artist:'),reply
+
     def artist_note(self,s,text,reply=''):
-        # A rubbed space on the sheet keeps marginalia out of the message.
-        patch=pygame.Surface((820,91),pygame.SRCALPHA)
-        for row in range(6,88,7):
-            jitter_line(patch,(244,240,220,235),(4,row),(814,row),10,row,1,2)
-        s.blit(patch,(180,218))
-        self.hand(s,'the Artist:',(195,220),RED,True)
-        words=text.split();lines=['']
-        for word in words:
-            candidate=(lines[-1]+' '+word).strip()
-            if self.font.size(candidate)[0]>765:lines.append(word)
-            else:lines[-1]=candidate
-        for i,line in enumerate(lines[:2]):
-            self.hand(s,line,(195,242+i*25),RED,seed=i)
-        if reply:self.hand(s,reply,(785,287),RED,True)
+        if not text:return
+        rect,lines,font,label,reply=self.artist_note_layout(s,text,reply)
+        patch=pygame.Surface(rect.size,pygame.SRCALPHA)
+        patch.fill((247,243,224,240))
+        jitter_line(patch,RED,(0,0),(rect.width,0),1,603,1,.5)
+        patch.blit(self.dialogue_small.render(label,True,RED),(12,4))
+        if reply:
+            prompt=self.dialogue_small.render(reply,True,RED)
+            patch.blit(prompt,(rect.width-prompt.get_width()-12,4))
+        for i,line in enumerate(lines):
+            patch.blit(font.render(line,True,PENCIL),(12,23+i*max(19,font.get_height())))
+        s.blit(patch,rect.topleft)
 
     def tile(self,page,index):
         key=(page,index)
@@ -100,7 +138,7 @@ class NotebookMaterial:
         # The rough strokes already carry graphite texture; a separate ghost
         # copy provides the erased registration without an RGBA multiply pass.
         ghost=layer.copy()
-        ghost.set_alpha(26)
+        ghost.set_alpha(14)
         target.blit(ghost,(2,1))
         target.blit(layer,(0,0))
 

@@ -107,25 +107,25 @@ class ActionCombatContracts(unittest.TestCase):
             game=SimpleNamespace(hit_stop=0.0),
         )
 
-    def test_new_game_starts_with_only_the_pencil_blade(self):
+    def test_new_game_starts_unarmed_until_the_artist_completes_a_tool(self):
         with tempfile.TemporaryDirectory() as directory:
             save_path = os.path.join(directory, "action-save.json")
             game = Game(self.screen, save_path)
             game.save.update_combat(WEAPON_ORDER, "rubber_band", game.weapons.ammo)
             game.reset(new_game=True)
 
-            self.assertEqual(game.weapons.unlocked, {"pencil_blade"})
-            self.assertEqual(game.weapons.current_id, "pencil_blade")
-            self.assertEqual(game.save.data["weapons"], ["pencil_blade"])
-            self.assertEqual(game.save.data["current_weapon"], "pencil_blade")
+            self.assertEqual(game.weapons.unlocked, set())
+            self.assertEqual(game.weapons.current_id, "unarmed")
+            self.assertEqual(game.save.data["weapons"], [])
+            self.assertEqual(game.save.data["current_weapon"], "unarmed")
 
     def test_weapon_unlock_select_and_snapshot_restore(self):
         player = Player()
         weapons = WeaponSystem(player)
-        self.assertEqual(weapons.unlocked, {"pencil_blade"})
+        self.assertEqual(weapons.unlocked, set())
         self.assertFalse(weapons.select("ink_pistol"))
 
-        for weapon_id in WEAPON_ORDER[1:]:
+        for weapon_id in WEAPON_ORDER:
             self.assertTrue(weapons.unlock(weapon_id))
         self.assertFalse(weapons.unlock("ink_pistol"), "unlock must be idempotent")
         self.assertTrue(weapons.select("marker"))
@@ -144,6 +144,8 @@ class ActionCombatContracts(unittest.TestCase):
         context = self.make_context()
         weapons = WeaponSystem(context.player)
         context.weapons = weapons
+
+        weapons.lend_drawn_tool("pencil_blade")
 
         self.assertTrue(weapons.handle_input(
             fire_pressed=True, fire_held=True, aim=(600, 550), ctx=context,
@@ -241,7 +243,7 @@ class ActionCombatContracts(unittest.TestCase):
         self.assertAlmostEqual(enemy.hp, enemy.max_hp - 3 * .62)
         self.assertNotIn("blocked", context.sounds.played)
 
-    def test_marker_volley_only_deals_one_damage_to_a_real_boss(self):
+    def test_marker_volley_only_spends_one_material_scaled_mark_on_a_real_boss(self):
         context = self.make_context(Player(330, 542))
         weapons = WeaponSystem(context.player)
         context.weapons = weapons
@@ -257,7 +259,7 @@ class ActionCombatContracts(unittest.TestCase):
         self.assertFalse(weapons.damage_enemy(
             boss, .62, 1, 145, .08, "marker", context, attack_id=77,
         ))
-        self.assertEqual(boss.hp, start_hp - 1)
+        self.assertAlmostEqual(boss.hp, start_hp - .85)
 
     def test_rubber_band_has_exactly_two_softening_ricochets(self):
         context = self.make_context()
@@ -279,6 +281,7 @@ class ActionCombatContracts(unittest.TestCase):
     def test_blade_mouse_aim_stays_readable_and_does_not_auto_lunge_at_air(self):
         context = self.make_context()
         weapons = WeaponSystem(context.player)
+        weapons.lend_drawn_tool("pencil_blade")
         context.weapons = weapons
         weapons._last_enemies = []
         weapons.handle_input(fire_pressed=True,
@@ -290,6 +293,7 @@ class ActionCombatContracts(unittest.TestCase):
     def test_real_weapon_attacks_advance_the_ink_clone_signal(self):
         context = self.make_context()
         weapons = WeaponSystem(context.player)
+        weapons.lend_drawn_tool("pencil_blade")
         context.weapons = weapons
         clone = create_enemy("ink_clone", 620, 590, 53)
         context.player.invulnerable = 999
@@ -505,9 +509,14 @@ class ActionCombatContracts(unittest.TestCase):
 
         pickup_values = list(pickup_catalog.items()) if isinstance(pickup_catalog, dict) else list(pickup_catalog)
         self.assertGreaterEqual(len(pickup_values), 4)
-        pickup_text = repr(pickup_values).lower()
-        for required in (tool for tool in WEAPON_ORDER[1:] if tool != "margin_maul"):
-            self.assertIn(required, pickup_text)
+        from weapon_delivery import CHAPTER_DELIVERIES
+        delivered = {delivery.weapon_id for deliveries in CHAPTER_DELIVERIES.values()
+                     for delivery in deliveries}
+        pickup_ids = {value[0] for value in pickup_values}
+        # A completed Artist drawing is a real source of a tool; new chapter
+        # deliveries need not duplicate the earlier standalone pickups.
+        self.assertTrue(set(WEAPON_ORDER[1:]) <= pickup_ids | delivered)
+        self.assertTrue({"fold_crossbow", "orbit_saw"} <= delivered)
 
 
 if __name__ == "__main__":

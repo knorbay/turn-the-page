@@ -51,7 +51,7 @@ class ArtistStagingTests(unittest.TestCase):
         arena = self.arena("coffee_crossfire")
         event = next(e for e in ctx.director.events if e.name == "margin_exit")
         arena.encounter_active = True
-        ctx.player.x = 5970
+        ctx.player.x = self.game.level.runtime.pacing_map(5970)
         for _ in range(180):
             ctx.director.update(1 / 60, ctx)
         self.assertFalse(event.active)

@@ -59,6 +59,8 @@ class WeaponPickup:
     draw_progress: float = 0.0
     draw_sound_played: bool = False
     page_index: int = 0
+    requires_sketch: str = ""
+    authored_by_director: bool = False
 
     @property
     def display_label(self):
@@ -78,15 +80,29 @@ class WeaponPickup:
         weapons = getattr(ctx, "weapons", None)
         if weapons is None:
             return
+        if getattr(ctx.player,"health",1)<=0:
+            release_artist_canvas(ctx,self)
+            return
         if self.weapon_id in weapons.unlocked:
             self.collected = self.completed = True
             ctx.level.flags.add(self.pickup_id)
+            release_artist_canvas(ctx,self)
             return
+        if self.requires_sketch:
+            save=getattr(ctx.level,"save_system",None)
+            saved=set(getattr(save,"data",{}).get("secrets",()))
+            found=any(getattr(e,"secret_id",None)==self.requires_sketch
+                      and getattr(e,"discovered",False)
+                      for e in getattr(getattr(ctx.level,"entities",None),"items",()))
+            if self.requires_sketch not in saved and not found:
+                return
         reveal_near = abs(ctx.player.center_x - self.x) < 390
-        canvas_free = artist_canvas_free(ctx)
-        if reveal_near and canvas_free and not self.drawing:
+        canvas_free = artist_canvas_free(ctx,self)
+        if reveal_near and canvas_free and not self.drawing and not self.authored_by_director:
+            if not claim_artist_canvas(ctx,self):return
             self.drawing = True
-        if self.drawing and self.draw_progress < 1 and canvas_free:
+        if self.drawing and self.draw_progress < 1 and canvas_free and not self.authored_by_director:
+            if not claim_artist_canvas(ctx,self):return
             if not self.draw_sound_played:
                 self.draw_sound_played = True
                 ctx.sounds.play("pencil")
@@ -99,6 +115,7 @@ class WeaponPickup:
             if int(self.time * 40) % 4 == 0:
                 ctx.particles.pencil_speck(stroke_x, self.y - 32)
             if self.draw_progress >= 1:
+                release_artist_canvas(ctx,self)
                 ctx.camera.kick(3.5, .16)
                 if getattr(ctx, "game", None) is not None:
                     ctx.game.behavior.record("artist_help", kind="weapon_drawn",
@@ -109,16 +126,18 @@ class WeaponPickup:
             ctx.level.interaction_hint = f"E  take {self.display_label}"
         if self.draw_progress < 1 or not (touching or (near and interact)):
             return
-        self._grant(ctx, weapons)
+        self._grant(ctx, weapons, select=interact or weapons.current_id == 'unarmed' or self.weapon_id == 'excalibur')
 
-    def _grant(self, ctx, weapons):
+    def _grant(self, ctx, weapons, select=None):
         if self.collected:
             return
         weapons.unlock(self.weapon_id)
-        weapons.select(self.weapon_id)
+        if select is None:select=weapons.current_id == 'unarmed' or self.weapon_id == 'excalibur'
+        if select:weapons.select(self.weapon_id)
         self.collected = self.completed = True
         ctx.level.flags.add(self.pickup_id)
-        ctx.level.toast = f"NEW DRAWING — {self.display_label}"
+        ctx.level.toast = (f"NEW DRAWING — {self.display_label}" if select else
+                           f"TOOL ADDED — {self.display_label} / Q to try it")
         ctx.level.toast_time = 4.0
         ctx.particles.paper_puff(self.x, self.y - 22, 20)
         ctx.sounds.play("pickup")
@@ -155,6 +174,17 @@ def register_artist_stage(arena, stage):
     if not hasattr(arena, "artist_stages"):
         arena.artist_stages = []
     arena.artist_stages.append(stage)
+
+
+def claim_artist_canvas(ctx,owner,allow_in_combat=False):
+    claim=getattr(getattr(ctx,"director",None),"claim_canvas",None)
+    return (claim(owner,allow_in_combat=allow_in_combat) if callable(claim)
+            else artist_canvas_free(ctx,owner,allow_in_combat=allow_in_combat))
+
+
+def release_artist_canvas(ctx,owner):
+    release=getattr(getattr(ctx,"director",None),"release_canvas",None)
+    if callable(release):release(owner)
 
 
 def claim_artist_stage(arena, stage):
@@ -225,7 +255,7 @@ class ArenaPaperBeat:
 
     @property
     def entry_ready(self):
-        return self.cover is None or self.cover.draw_progress >= 1
+        return self.cover is None or getattr(self.cover,"collider_active",self.cover.draw_progress>=1)
 
     @property
     def wave_ready(self):
@@ -245,22 +275,30 @@ class ArenaPaperBeat:
             if self.cover is not None and self.cover.draw_progress < 1:
                 self.cover.draw_progress = 1
             release_artist_stage(self.arena, self)
+            release_artist_canvas(ctx,self)
+            return
+        if ctx.player.health<=0:
+            release_artist_canvas(ctx,self)
+            release_artist_stage(self.arena,self)
             return
         if not self.arena.encounter_active:
             if (self.cover is not None and self.cover.draw_progress < 1
-                    and ctx.player.center_x >= self.arena.start_x - 420
-                    and artist_canvas_free(ctx)):
+                    and (self.cover.draw_progress>0 or ctx.player.center_x >= self.arena.start_x - 420)
+                    and artist_canvas_free(ctx,self)):
+                if not claim_artist_canvas(ctx,self):return
                 if self.cover.draw_progress == 0:
                     ctx.sounds.play("pencil")
                 self.cover.draw_progress = min(1, self.cover.draw_progress + dt / .62)
                 ctx.director.tool = ArtistTool("pencil", self.cover.visible_x2,
                                                 self.cover.y, True, -.58, 1.0)
                 ctx.particles.pencil_speck(self.cover.visible_x2, self.cover.y)
+                if self.cover.draw_progress>=1:release_artist_canvas(ctx,self)
             return
         # Direct boss practice can enter without the approach animation. Finish
         # its physical cover immediately, without drawing over an active boss.
         if self.cover is not None and self.cover.draw_progress < 1:
             self.cover.draw_progress = 1
+            release_artist_canvas(ctx,self)
         if self.arena.wave != self.last_wave:
             self.last_wave = self.arena.wave
             if self.mode == "tear_spawn" and self.last_wave > 0:
@@ -275,7 +313,9 @@ class ArenaPaperBeat:
             # perch. Keep this useful landing rather than trapping the pause.
             self.erased = self.folded = True
             release_artist_stage(self.arena, self)
+            release_artist_canvas(ctx,self)
             return
+        if not claim_artist_canvas(ctx,self,allow_in_combat=True):return
         if self.edit_time == 0:
             ctx.level.toast = "THE ARTIST: A small revision. Next wave in a moment."
             ctx.level.toast_time = 1.8
@@ -302,6 +342,7 @@ class ArenaPaperBeat:
             self.erased = self.folded = True
             ctx.camera.kick(3, .16)
             release_artist_stage(self.arena, self)
+            release_artist_canvas(ctx,self)
 
     def draw(self, surface, camera, renderer):
         if not self.arena.encounter_active:
@@ -318,8 +359,9 @@ class ArenaPaperBeat:
             left, right = camera.screen_x(self.cover.x1), camera.screen_x(self.cover.x2)
             for x in range(left, right, 16):
                 pygame.draw.line(surface, RED_RULE, (x, y - 8), (x + 7, y - 2), 2)
-        if self.mode == "ink_spread":
-            renderer.doodle_text(surface, "the ink is still wet", (cx - 78, gy - 118),
+        if self.mode == "ink_spread" and cleared_wave(self.arena):
+            renderer.doodle_text(surface, "the ink is still wet",
+                                 (camera.screen_x(self.arena.start_x + 70), gy - 230),
                                  INK_LIGHT, renderer.font_small, -2)
 
 
@@ -378,7 +420,9 @@ def expand_action_chapter(runtime):
 
 
 def _action_prologue(runtime):
-    _arena(runtime, 1580, 2040, "first_crossout", [
+    # Enough space for a returning fold and a visible dodge, while the exit
+    # remains on the original safe ground before the Artist's bridge.
+    _arena(runtime, 1580, 2210, "first_crossout", [
         {"wave": 0, "kind": "crawler", "offset": 250},
         {"wave": 1, "kind": "crawler", "offset": 210, "count": 2, "spacing": 105},
     ], paper="draw_cover")
@@ -396,7 +440,7 @@ def _action_prologue(runtime):
         {"wave": 1, "kind": "goblin_scribble", "offset": 330},
         {"wave": 1, "kind": "ink_samurai", "offset": 780},
     ], paper="tear_spawn")
-    _arena(runtime, 9500, 10620, "moon_gate_duel", [
+    _arena(runtime, 9150, 10700, "moon_gate_duel", [
         {"wave": 0, "kind": "ink_samurai", "offset": 340},
         {"wave": 0, "kind": "ink_samurai", "offset": 760},
         {"wave": 1, "kind": "origami_drone", "offset": 280},
@@ -426,13 +470,13 @@ def _action_margins(runtime):
     # The marker is drawn only after the red-margin traversal.  The page now
     # has a real quiet middle instead of three similarly spaced arenas.
     _pickup(runtime, "marker_shotgun", 8220, label="MARKER SHOTGUN")
-    _arena(runtime, 8300, 9440, "marker_margin_trial", [
+    _arena(runtime, 8300, 9700, "marker_margin_trial", [
         {"wave": 0, "kind": "ruler_guard", "offset": 410},
         {"wave": 0, "kind": "crawler", "offset": 220, "count": 2},
         {"wave": 1, "kind": "ruler_guard", "offset": 350},
         {"wave": 1, "kind": "paper_wasp", "offset": 190, "count": 2, "spacing": 300},
     ], paper="draw_cover")
-    _arena(runtime, 11200, 12520, "midnight_train", [
+    _arena(runtime, 11100, 12780, "midnight_train", [
         {"wave": 0, "kind": "ink_outlaw", "offset": 330},
         {"wave": 0, "kind": "tumbleweed_thing", "offset": 760},
         {"wave": 1, "kind": "ink_outlaw", "offset": 900},
@@ -468,7 +512,8 @@ def _action_mistakes(runtime):
         {"wave": 0, "kind": "crawler", "offset": 220, "count": 2},
         {"wave": 1, "kind": "spitter", "offset": 260, "count": 2, "spacing": 250},
     ], paper="draw_cover")
-    _pickup(runtime, "rubber_band", 7250, label="ORBITAL RUBBER BAND")
+    # The page begins with a real ranged drawing, not a carried-over sword.
+    _pickup(runtime, "rubber_band", 650, label="ORBITAL RUBBER BAND")
     # BabyFace is the page-ending correction, not a mid-page speed bump.  The
     # construction route before it earns the extra length.
     _arena(runtime, 7500, 8620, "orbital_debris", [
@@ -477,7 +522,7 @@ def _action_mistakes(runtime):
         {"wave": 1, "kind": "moon_bot", "offset": 540},
         {"wave": 1, "kind": "goblin_scribble", "offset": 260},
     ], paper="tear_spawn")
-    _arena(runtime, 10500, 11720, "zero_garden", [
+    _arena(runtime, 10450, 11840, "zero_garden", [
         {"wave": 0, "kind": "moon_bot", "offset": 340},
         {"wave": 0, "kind": "star_scout", "offset": 820},
         {"wave": 1, "kind": "goblin_scribble", "offset": 270},
@@ -486,7 +531,7 @@ def _action_mistakes(runtime):
     # Draw the Eraser before the Orbital Mistake so its phase windows teach
     # the page's heavy tool instead of saving it for the last thirty seconds.
     _pickup(runtime, "eraser_cannon", 10200, label="ERASER CANNON")
-    _arena(runtime, 14020, 15480, "eraser_calibration", [
+    _arena(runtime, 13880, 15220, "eraser_calibration", [
         {"wave": 0, "kind": "ruler_guard", "offset": 320, "count": 2, "spacing": 330},
         {"wave": 1, "kind": "eraser_brute", "offset": 570},
         {"wave": 1, "kind": "doodle_turret", "offset": 260},

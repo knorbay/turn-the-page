@@ -41,6 +41,9 @@ class PaperProjectile:
     gravity: float = 180.0
     grace: float = .14
     terrain_collision: bool = True
+    ricochet_bounds: tuple[float, float] | None = None
+    bounces_left: int = 0
+    damage_enabled: bool = True
 
     @property
     def rect(self):
@@ -59,6 +62,18 @@ class PaperProjectile:
         self.vy += self.gravity * dt
         self.x += self.vx * dt
         self.y += self.vy * dt
+        if self.ricochet_bounds is not None and self.bounces_left > 0:
+            left, right = self.ricochet_bounds
+            if self.x < left + self.radius and self.vx < 0:
+                self.x = left + self.radius
+                self.vx = abs(self.vx)
+                self.bounces_left -= 1
+                ctx.particles.pencil_speck(self.x, self.y)
+            elif self.x > right - self.radius and self.vx > 0:
+                self.x = right - self.radius
+                self.vx = -abs(self.vx)
+                self.bounces_left -= 1
+                ctx.particles.pencil_speck(self.x, self.y)
         if self.terrain_collision and any(
             self.rect.colliderect(stroke) for stroke in ctx.world.collision_rects()
         ):
@@ -66,7 +81,7 @@ class PaperProjectile:
             ctx.particles.pencil_speck(self.x, self.y)
             return
         player = ctx.player
-        if (self.grace <= 0 and player.dash_timer > .08
+        if (self.damage_enabled and self.grace <= 0 and player.dash_timer > .08
                 and not player.return_used
                 and self.rect.colliderect(player.rect.inflate(10, 10))
                 and getattr(ctx, "weapons", None) is not None):
@@ -93,7 +108,7 @@ class PaperProjectile:
                 ctx.level.toast_time = 1.2
             return
         if (
-            self.grace <= 0
+            self.damage_enabled and self.grace <= 0
             and self.rect.colliderect(ctx.player.rect)
             and ctx.player.hurt(self.x)
         ):
@@ -107,6 +122,9 @@ class PaperProjectile:
     def draw(self, surface, camera):
         x = camera.screen_x(self.x)
         y = round(self.y + camera.offset_y)
+        if not self.damage_enabled:
+            rough_circle(surface, (169, 166, 150), (x, y), self.radius, 61, 1, 1)
+            return
         if self.kind == "staple":
             pygame.draw.lines(
                 surface, INK, False,
@@ -162,6 +180,10 @@ class PaperProjectile:
             pygame.draw.polygon(surface, (137, 174, 184), points)
             pygame.draw.lines(surface, (47, 70, 82), True, points, 2)
             pygame.draw.line(surface, (237, 192, 93), (x - 3, y), (x + 3, y), 1)
+        elif self.kind == "bounty_slug":
+            pygame.draw.ellipse(surface, (155, 104, 54), (x-8, y-4, 16, 8))
+            pygame.draw.ellipse(surface, INK, (x-8, y-4, 16, 8), 2)
+            pygame.draw.line(surface, (215, 183, 113), (x-4, y-2), (x+3, y-2), 1)
         else:
             pygame.draw.circle(surface, (29, 29, 36), (x, y), self.radius)
             pygame.draw.circle(
@@ -231,17 +253,23 @@ def _player_hit_feedback(ctx, source_x):
 
 
 def _health_scratches(surface, camera, enemy, y_offset=92, x_world=None):
+    if getattr(enemy, "cinematic_active", False):
+        return
     x = camera.screen_x(enemy.x if x_world is None else x_world)
     y = round(enemy.y - y_offset + camera.offset_y)
     spacing = 6 if enemy.max_hp <= 18 else 5
     start = x - ((enemy.max_hp - 1) * spacing) // 2
     for index in range(enemy.max_hp):
-        color = INK if index < enemy.hp else (180, 172, 154)
-        pygame.draw.line(
-            surface, color,
-            (start + index * spacing, y),
-            (start + index * spacing + 3, y + 7), 2,
-        )
+        a = (start + index * spacing, y)
+        b = (start + index * spacing + 3, y + 7)
+        pygame.draw.line(surface, (180, 172, 154), a, b, 2)
+        remaining = max(0.0, min(1.0, enemy.hp - index))
+        if remaining:
+            # Material effectiveness can remove part of a health scratch.
+            # A short remaining stroke tells that truth without damage popups.
+            pygame.draw.line(surface, INK, a,
+                             (a[0] + (b[0]-a[0])*remaining,
+                              a[1] + (b[1]-a[1])*remaining), 2)
 
 
 def _dashed_line(surface, color, start, end, width=1, dash=7, gap=5):
@@ -273,6 +301,16 @@ class AdvancedEnemy:
     is_boss = False
     block_hint = ""
     contact_states: tuple[str, ...] = ()
+    # These warnings publish a direction/target. Crossing the drawing after
+    # that point must not make its gun or charge turn around without a cue.
+    AIM_STATES = frozenset({"aim", "scan", "quickdraw", "lock", "charge",
+                            "agent_aim", "agent_burst"})
+    COMMITTED_STATES = AIM_STATES | frozenset({
+        "ram_warn", "ram", "rustle", "roll", "snicker", "pounce",
+        "sheath", "draw_cut", "brace", "thrust", "tail_warn", "comet_dash",
+        "charge_telegraph", "slam_telegraph", "slam", "dive_telegraph", "dive",
+        "echo_telegraph", "echo_slash", "prickle", "burst", "pluck",
+    })
 
     def __init__(self, x, ground_y=590, seed=1):
         self.x = float(x)
@@ -299,6 +337,7 @@ class AdvancedEnemy:
         self.last_attack_serial = -1
         self.block_hint_cooldown = 0.0
         self._temporary_erases: list[dict] = []
+        self.floor_edit_preview = None
 
     @property
     def rect(self):
@@ -351,6 +390,8 @@ class AdvancedEnemy:
         return remaining, total, max(0.0, min(1.0, self.state_time / self.state_duration))
 
     def _draw_opening(self, surface, center, radius=22):
+        if getattr(self, "artist_erasing", False):
+            return
         status = self.opening_status()
         if status is None:
             return
@@ -392,7 +433,8 @@ class AdvancedEnemy:
             and attack_id == self.last_attack_id
             and self.last_attack_hits < 3
         )
-        if self.dead:
+        if (self.dead or getattr(self, "artist_erasing", False) or
+                getattr(self, "notebook_activation_blocked", False)):
             return False
         # A short post-hit i-frame prevents accidental double application; it
         # is not armor, so it must not emit a misleading block clang for every
@@ -409,6 +451,9 @@ class AdvancedEnemy:
                 self.last_attack_id = attack_id
                 self.last_attack_hits = 1
         amount = max(0.0, float(amount))
+        if self.is_boss:
+            from boss_effectiveness import boss_damage
+            amount = boss_damage(amount, self, tags)
         if amount <= 0:
             return False
         self.hp -= amount
@@ -528,7 +573,12 @@ class AdvancedEnemy:
         self.projectiles = [p for p in self.projectiles if p.life > 0]
 
     def update(self, dt, ctx, bounds):
-        if self.dead:
+        if getattr(self, "artist_erasing", False):
+            self.projectiles.clear()
+            self.floor_edit_preview = None
+            self._restore_temporary_erases(force=True)
+            return
+        if self.dead or getattr(self, "notebook_activation_blocked", False):
             return
         self._tick(dt)
         self._update_temporary_erases(dt)
@@ -536,7 +586,8 @@ class AdvancedEnemy:
         if self.dead:
             return
         attack_state = self.state
-        if self.state not in {"scan", "quickdraw", "lock", "charge", "agent_aim", "agent_burst"}:
+        committed_facing = self.facing
+        if self.state not in self.AIM_STATES:
             self.aim_target = (ctx.player.center_x, ctx.player.rect.centery)
         staggered = self.hit_stun > 0 and (
             self.attack_suppressed > 0 or self.state not in self.contact_states)
@@ -546,6 +597,8 @@ class AdvancedEnemy:
             self.state_time += dt
         else:
             self._think(dt, ctx, bounds)
+        if not self.is_boss and attack_state in self.COMMITTED_STATES:
+            self.facing = committed_facing
         if not self.is_boss and self.state != attack_state:
             if self.state in {"drop_warn", "flare", "dive_telegraph"}:
                 ctx.sounds.play("enemy_telegraph_air")
@@ -558,14 +611,16 @@ class AdvancedEnemy:
         self._deal_contact_damage(ctx, attack_state)
         self._update_projectiles(dt, ctx)
 
-    def _erase_floor_temporarily(self, ctx, center_x, width=125, duration=2.0):
-        """Erase a safe floor interval, restoring it without clobbering edits."""
-
+    def _plan_floor_erase(self, ctx, center_x, width=125, avoid_feet=True):
+        """Choose an actual, completed ink interval before publishing a cut."""
         if self._temporary_erases:
-            return False
+            return None
         candidates = []
         for platform in getattr(ctx.world, "platforms", ()):
             if not platform.enabled or platform.layer != ctx.world.active_layer:
+                continue
+            if (platform.draw_progress < 1 or
+                    not getattr(platform, "collider_active", platform.collidable)):
                 continue
             if platform.thickness > 70 or platform.x2 - platform.x1 < width + 30:
                 continue
@@ -576,7 +631,7 @@ class AdvancedEnemy:
                 if distance < 75:
                     candidates.append((distance, platform))
         if not candidates:
-            return False
+            return None
         platform = min(candidates, key=lambda item: item[0])[1]
         # A committed eraser edit may threaten the player's route, but it must
         # never delete the pixels already beneath both feet in the landing
@@ -584,7 +639,7 @@ class AdvancedEnemy:
         # still removes collision and demands a jump/dash on the next beat.
         player_x = ctx.player.center_x
         safe_radius = width * .5 + ctx.player.WIDTH + 24
-        if abs(center_x - player_x) < safe_radius:
+        if avoid_feet and abs(center_x - player_x) < safe_radius:
             minimum = platform.x1 + width * .5 + 10
             maximum = platform.visible_x2 - width * .5 - 10
             options = [max(minimum, min(maximum, player_x - safe_radius)),
@@ -593,21 +648,80 @@ class AdvancedEnemy:
                        if minimum <= value <= maximum and abs(value - player_x) >= safe_radius - 2]
             if options:
                 center_x = min(options, key=lambda value: abs(value - center_x))
+            else:
+                # An edge or narrow remaining stroke may leave no safe side.
+                # Decline the edit instead of silently cutting beneath feet.
+                return None
         start = max(platform.x1 + 8, center_x - width / 2)
         end = min(platform.visible_x2 - 8, center_x + width / 2)
-        before = list(platform.erased)
-        platform.erase(start, end)
-        after = list(platform.erased)
+        if end - start < width - 1:
+            return None
+        if not any(a <= start and b >= end for a, b in platform.visible_intervals()):
+            return None
+        return {"platform": platform, "start": start, "end": end}
+
+    def _erase_floor_temporarily(self, ctx, center_x, width=125, duration=2.0, plan=None):
+        """Commit only the promised cut, keeping occupied landing ink intact."""
+        plan = plan or self._plan_floor_erase(ctx, center_x, width)
+        if plan is None or self._temporary_erases:
+            return False
+        platform, start, end = plan["platform"], plan["start"], plan["end"]
+        if (not platform.enabled or platform.draw_progress < 1 or
+                not getattr(platform, "collider_active", platform.collidable) or
+                platform.layer != ctx.world.active_layer or
+                not any(a <= start and b >= end for a, b in platform.visible_intervals())):
+            return False
+        feet = ctx.player.rect
+        floor_y = platform.y_at((start + end) * .5)
+        if (feet.right > start - 8 and feet.left < end + 8 and
+                feet.bottom >= floor_y - 8 and feet.top < floor_y + platform.thickness + 10):
+            return False
+        before = list(platform.erased_intervals)
+        owner = object()
+        platform.erase_owned(owner, start, end)
+        after = list(platform.erased_intervals)
         self._temporary_erases.append({
             "platform": platform,
+            "owner": owner,
             "before": before,
             "after": after,
             "time": float(duration),
+            "duration": float(duration),
+            "start": start,
+            "end": end,
         })
         for index in range(9):
             x = start + (end - start) * (index + .5) / 9
             ctx.particles.eraser_dust(x, platform.y_at(x), 2)
         return True
+
+    def draw_page_edits(self, surface, camera, renderer):
+        """Red construction promises a hole; blue retracing promises its return."""
+        if getattr(self, "artist_erasing", False):
+            return
+        preview = self.floor_edit_preview
+        marks = [(preview, (158, 65, 60), 0.0)] if preview else []
+        marks.extend((effect, (72, 113, 131),
+                      1 - effect["time"] / max(.001, effect.get("duration", 1)))
+                     for effect in self._temporary_erases
+                     if "start" in effect and "end" in effect)
+        for plan, color, progress in marks:
+            platform = plan["platform"]
+            if not platform.enabled:
+                continue
+            left, right = camera.screen_x(plan["start"]), camera.screen_x(plan["end"])
+            y = round(platform.y_at((plan["start"] + plan["end"]) * .5) + camera.offset_y)
+            _dashed_line(surface, color, (left, y - 5), (right, y - 5), 2, 9, 7)
+            for px in (left, right):
+                pygame.draw.line(surface, color, (px, y - 12), (px, y + 7), 2)
+            if preview is plan:
+                for px in range(left + 5, right, 19):
+                    pygame.draw.line(surface, color, (px, y + 5), (px + 9, y - 12), 1)
+            else:
+                pygame.draw.line(surface, color, (left, y + 4),
+                                 (left + round((right - left) * max(0, min(1, progress))), y + 4), 2)
+                renderer.doodle_text(surface, "retracing", (left, y + 17), color,
+                                     renderer.font_small, -1)
 
     def _update_temporary_erases(self, dt):
         keep = []
@@ -617,22 +731,23 @@ class AdvancedEnemy:
                 keep.append(effect)
                 continue
             platform = effect["platform"]
-            # Restore only if nobody else edited the same stroke meanwhile.
-            if platform.erased == effect["after"]:
-                platform.erased = list(effect["before"])
+            platform.restore_owned(effect["owner"])
         self._temporary_erases = keep
 
     def _restore_temporary_erases(self, force=False):
+        # The argument remains valid for death/rescue callers. Ownership makes
+        # both forced cleanup and ordinary restoration safe beside other edits.
+        del force
         for effect in self._temporary_erases:
-            platform = effect["platform"]
-            if force and platform.erased == effect["after"]:
-                platform.erased = list(effect["before"])
+            effect["platform"].restore_owned(effect["owner"])
         self._temporary_erases.clear()
 
     def _base_color(self):
         return (151, 47, 49) if self.hit_flash > 0 else INK
 
-    def _draw_telegraph(self, surface, camera, renderer, cue="!"):
+    def _draw_telegraph(self, surface, camera, renderer, cue="!", label_offset=None):
+        if getattr(self, "artist_erasing", False):
+            return
         x = camera.screen_x(self.x)
         y = round(self.y - self.height / 2 + camera.offset_y)
         # A tightening construction arc communicates the time until impact.
@@ -645,7 +760,14 @@ class AdvancedEnemy:
             pygame.draw.line(surface, (151, 66, 62),
                              (x+side*(radius+3), y), (x+side*(radius+9), y), 2)
         label = renderer.font_small.render(cue, True, (145, 57, 55))
-        surface.blit(label, (x-label.get_width()//2, y-radius-25))
+        label_y = (y-radius-25 if label_offset is None
+                   else round(self.y + camera.offset_y - label_offset))
+        # Long translated cues and elevated secret duels keep their warning
+        # on the actual sheet even while a drawing hugs the camera edge.
+        label_x = max(12, min(surface.get_width()-label.get_width()-12,
+                             x-label.get_width()//2))
+        label_y = max(12, min(surface.get_height()-label.get_height()-12, label_y))
+        surface.blit(label, (label_x, label_y))
         if self.state in {"scan", "quickdraw", "lock", "charge", "agent_aim", "agent_burst"} and self.aim_target:
             origin = (x, round(self.y-self.height*.55+camera.offset_y))
             target = (camera.screen_x(self.aim_target[0]),
@@ -865,11 +987,15 @@ class EraserBrute(AdvancedEnemy):
     base_hp = 5
     contact_states = ("slam",)
 
+    def __init__(self, x, ground_y=590, seed=1):
+        super().__init__(x, ground_y, seed)
+        self.slam_x = self.x
+        self.slam_vx = 0
+
     def _is_vulnerable(self):
         return self.state == "recover"
 
     def _think(self, dt, ctx, bounds):
-        del bounds
         distance = ctx.player.center_x - self.x
         if self.state == "idle":
             self.facing = 1 if distance > 0 else -1
@@ -877,16 +1003,26 @@ class EraserBrute(AdvancedEnemy):
             if self.state_time <= 0 and abs(distance) > 115:
                 self.state_time = .14
             elif self.state_time <= 0:
-                self._set_state("slam_telegraph", .78)
+                if self._set_state("slam_telegraph", .78):
+                    flight = 710 / 1150
+                    speed = min(310, max(175, abs(distance) * 1.6))
+                    self.slam_x = max(bounds[0] + self.radius,
+                                      min(bounds[1] - self.radius,
+                                          self.x + self.facing * speed * flight))
+                    self.slam_vx = (self.slam_x - self.x) / flight
+                    self.vx = 0
+                    self.floor_edit_preview = self._plan_floor_erase(
+                        ctx, self.slam_x, 128, avoid_feet=False)
         elif self.state == "slam_telegraph":
             self.vx *= .45
             if self.state_time <= 0:
                 self._set_state("slam", 1.1)
                 self.vy = -355
-                self.vx = self.facing * min(310, max(175, abs(distance) * 1.6))
+                self.vx = self.slam_vx
         elif self.state == "slam":
-            self.vx = self.facing * min(310, max(150, abs(distance) * 1.6))
+            self.vx = self.slam_vx
             if self.state_time <= 0:
+                self.floor_edit_preview = None
                 self._set_state("recover", 1.25)
         elif self.state == "recover" and self.state_time <= 0:
             self._set_state("idle", .65)
@@ -894,7 +1030,11 @@ class EraserBrute(AdvancedEnemy):
     def _after_integrate(self, dt, ctx, bounds, hit_wall, landed):
         del dt, bounds, hit_wall
         if self.state == "slam" and landed:
-            self._erase_floor_temporarily(ctx, self.x, 128, 2.25)
+            self.x = self.slam_x
+            if self.floor_edit_preview is not None:
+                self._erase_floor_temporarily(ctx, self.slam_x, 128, 2.25,
+                                             plan=self.floor_edit_preview)
+            self.floor_edit_preview = None
             ctx.camera.kick(7, .25)
             ctx.sounds.play("erase")
             self._set_state("recover", 1.28)
@@ -902,19 +1042,29 @@ class EraserBrute(AdvancedEnemy):
     def draw(self, surface, camera, renderer):
         if self.dead:
             return
+        self.draw_page_edits(surface, camera, renderer)
         x, y = camera.screen_x(self.x), round(self.y + camera.offset_y)
         color = self._base_color()
         if self.state == "slam_telegraph":
             self._draw_telegraph(surface, camera, renderer, "ERASE")
+            target_x = camera.screen_x(self.slam_x)
             pygame.draw.ellipse(surface, RED_RULE,
-                                (x - 68, round(self.ground_y - 12 + camera.offset_y), 136, 18), 2)
+                                (target_x - 68, round(self.ground_y - 12 + camera.offset_y), 136, 18), 2)
+            _dashed_line(surface, RED_RULE, (target_x, round(self.ground_y - 105 + camera.offset_y)),
+                         (target_x, round(self.ground_y - 19 + camera.offset_y)), 1, 7, 7)
         angle = -4 if self.state == "slam" else 2
         body = pygame.Surface((80, 58), pygame.SRCALPHA)
         pygame.draw.polygon(body, (218, 145, 145), [(4, 10), (72, 2), (79, 43), (12, 55)])
         pygame.draw.polygon(body, (239, 192, 181), [(4, 10), (16, 25), (12, 55), (0, 38)])
-        pygame.draw.lines(body, color, True, [(4, 10), (72, 2), (79, 43), (12, 55)], 2)
+        pygame.draw.lines(body, color, True, [(4, 10), (72, 2), (79, 43), (12, 55)], 3)
+        for hatch in range(4):
+            pygame.draw.line(body, (182, 106, 111), (45+hatch*7, 10),
+                             (39+hatch*7, 19), 1)
         body = pygame.transform.rotate(body, angle)
         surface.blit(body, body.get_rect(center=(x, y - 31)))
+        if self.state != "slam":
+            for side in (-1, 1):
+                pygame.draw.line(surface, color, (x+side*19, y-4), (x+side*30, y-2), 4)
         if self.state == "recover":
             renderer.doodle_text(surface, "soft side exposed", (x - 71, y - 92),
                                  INK_LIGHT, renderer.font_small, -2)
@@ -1094,17 +1244,37 @@ class InkClone(AdvancedEnemy):
             return
         x, y = camera.screen_x(self.x), round(self.y + camera.offset_y)
         color = self._base_color()
-        # An imperfect mirrored stick figure, visibly denser than the player.
-        head_y = y - 42
-        pygame.draw.circle(surface, color, (x, head_y), 8, 3)
-        pygame.draw.line(surface, color, (x, head_y + 8), (x, y - 16), 4)
-        stride = math.sin(self.time * 11) * 8 if abs(self.vx) > 20 else 3
-        pygame.draw.line(surface, color, (x, y - 16), (x - stride, y), 3)
-        pygame.draw.line(surface, color, (x, y - 16), (x + stride, y), 3)
-        pygame.draw.line(surface, color, (x, y - 29), (x - stride, y - 16), 3)
-        pygame.draw.line(surface, color, (x, y - 29), (x + stride, y - 16), 3)
-        pygame.draw.circle(surface, (92, 88, 89), (x + self.facing * 4, head_y - 1), 2)
+        # A slipped carbon impression: split torso, mismatched knees and a
+        # dragged unfinished face. Its repeated construction lies behind the
+        # silhouette, rather than turning another player stickman black.
+        f = self.facing
+        lean = f * (5 if self.state == "echo_slash" else -3 if self.state == "echo_telegraph" else 0)
+        head = [(x-7+lean,y-51),(x+8+lean,y-49),(x+11+lean,y-37),
+                (x+1+lean,y-32),(x-9+lean,y-37)]
+        pygame.draw.lines(surface, (145, 139, 144), False,
+                          [(px-f*6,py-3) for px,py in head], 1)
+        pygame.draw.polygon(surface, (94, 87, 100), head)
+        pygame.draw.lines(surface, color, True, head, 2)
+        pygame.draw.line(surface, PAPER, (x+f*2+lean,y-44), (x+f*7+lean,y-43), 2)
+        torso = [(x-6+lean,y-31),(x+8+lean,y-32),(x+5,y-18),
+                 (x+1,y-23),(x-5,y-16),(x-10,y-25)]
+        pygame.draw.polygon(surface, (137, 127, 141), torso)
+        pygame.draw.lines(surface, color, True, torso, 2)
+        stride = math.sin(self.time * 13) * min(10, abs(self.vx)*.035)
+        for side in (-1,1):
+            foot = (x+side*10+side*stride,y)
+            knee = (x+side*8-side*stride*.4,y-10)
+            pygame.draw.lines(surface,(147,139,149),False,
+                              [(x+side*4-4,y-19), (knee[0]-4,knee[1]-2), (foot[0]-4,foot[1])],1)
+            pygame.draw.lines(surface,color,False,[(x+side*4,y-19),knee,foot],2)
+        reach = 48 if self.state == "echo_slash" else 17
+        hand = (x+f*reach,y-30 if self.state == "echo_slash" else y-17)
+        pygame.draw.lines(surface,color,False,[(x+lean,y-29),(x+f*15,y-33),hand],2)
+        for offset in (5,10):
+            pygame.draw.line(surface, (134, 124, 140),
+                             (x-f*8,y-29-offset), (x-f*25,y-21-offset), 1)
         if self.state == "echo_telegraph":
+            _dashed_line(surface, (113, 88, 125), (x,y-32), (x+f*52,y-32),2,6,5)
             renderer.doodle_text(surface, "copy...", (x - 30, y - 82),
                                  INK_LIGHT, renderer.font_small, -1)
         if self.state == "echo_slash":
@@ -1132,15 +1302,17 @@ class DoodleTurret(AdvancedEnemy):
     def _think(self, dt, ctx, bounds):
         del dt, bounds
         distance = ctx.player.center_x - self.x
-        self.facing = 1 if distance > 0 else -1
+        if self.state == "idle":
+            self.facing = 1 if distance > 0 else -1
         if self.state == "idle" and self.state_time <= 0:
+            self.aim_target = (ctx.player.center_x, ctx.player.rect.centery)
             self._set_state("aim", .58)
         elif self.state == "aim" and self.state_time <= 0:
             self.shot_count += 1
             origin_x, origin_y = self.x + self.facing * 20, self.y - 31
             speed, lift = _ballistic_velocity(
                 origin_x, origin_y,
-                ctx.player.center_x, ctx.player.rect.centery,
+                *(self.aim_target or (ctx.player.center_x, ctx.player.rect.centery)),
                 210, 410,
             )
             self.projectiles.append(PaperProjectile(
@@ -1149,7 +1321,8 @@ class DoodleTurret(AdvancedEnemy):
             if self.shot_count % 3 == 0:
                 paper_speed, paper_lift = _ballistic_velocity(
                     self.x + self.facing * 18, self.y - 27,
-                    ctx.player.center_x, ctx.player.rect.centery - 16,
+                    (self.aim_target or (ctx.player.center_x, ctx.player.rect.centery))[0],
+                    (self.aim_target or (ctx.player.center_x, ctx.player.rect.centery))[1] - 16,
                     260, 385,
                 )
                 self.projectiles.append(PaperProjectile(
@@ -1185,10 +1358,18 @@ class DoodleTurret(AdvancedEnemy):
                              (barrel_end, y - 23)], 2)
         pygame.draw.line(surface, INK_LIGHT, (x - 13, y - 11), (x + 8, y - 11), 1)
         if self.state == "aim":
-            self._draw_telegraph(surface, camera, renderer, "o")
-            px, py = camera.screen_x(self.x + self.facing * 120), y - 31
-            jitter_line(surface, (153, 70, 67), (x + self.facing * 20, y - 31),
-                        (px, py), 1, self.seed + 90, 1, .6)
+            self._draw_telegraph(surface, camera, renderer, "INK ARC")
+            if self.aim_target:
+                origin_x, origin_y = self.x + self.facing * 20, self.y - 31
+                vx, vy = _ballistic_velocity(origin_x, origin_y, *self.aim_target, 210, 410)
+                travel = min(1.2, abs(self.aim_target[0] - origin_x) / max(1, abs(vx)))
+                points = [(camera.screen_x(origin_x + vx * travel * i / 12),
+                           round(origin_y + vy * travel * i / 12 +
+                                 105 * (travel * i / 12) ** 2 + camera.offset_y))
+                          for i in range(13)]
+                for i in range(0, 12, 2):
+                    pygame.draw.line(surface, (153, 70, 67), points[i], points[i + 1], 1)
+                pygame.draw.circle(surface, RED_RULE, points[-1], 6, 1)
         for projectile in self.projectiles:
             projectile.draw(surface, camera)
 
@@ -1982,7 +2163,7 @@ class BabyFaceGiant(AdvancedEnemy):
                 end = x + self.facing * 252
                 jitter_line(surface, RED_RULE, (x, y - 112), (end, y - 112),
                             3, self.seed + 300, 2, 1.4)
-        if not self.empowered:
+        if not self.empowered and not getattr(self, "cinematic_active", False):
             attempt = max(1, min(3, int(self.signature_attempt)))
             renderer.doodle_text(surface, f"ATTEMPT {attempt} / 3", (x - 54, y - 312),
                                  (144, 55, 57), renderer.font_small, -3)
@@ -2049,22 +2230,47 @@ class InkSamurai(AdvancedEnemy):
             return
         x, y = camera.screen_x(self.x), round(self.y + camera.offset_y)
         color = self._base_color()
-        # Wide sleeves, split hakama, top-knot, and the sheathed katana make
-        # the silhouette readable before any animation starts.
-        pygame.draw.polygon(surface, (225, 218, 198),
-                            [(x, y - 61), (x - 23, y - 43), (x - 15, y - 8),
-                             (x, y - 19), (x + 16, y - 8), (x + 23, y - 43)])
-        pygame.draw.lines(surface, color, True,
-                          [(x, y - 61), (x - 23, y - 43), (x - 15, y - 8),
-                           (x, y - 19), (x + 16, y - 8), (x + 23, y - 43)], 3)
-        rough_circle(surface, color, (x, y - 66), 11, self.seed + 7, 3, 2, wobble=1.0)
-        pygame.draw.circle(surface, color, (x + self.facing * 3, y - 67), 2)
-        pygame.draw.circle(surface, color, (x - self.facing * 5, y - 82), 5, 2)
+        # A sharp straw kasa, layered kimono and separate hakama panels make
+        # a swordsman rather than a round head sitting on one flat pentagon.
+        f = self.facing
+        head = [(x-9, y-72), (x+9, y-72), (x+8, y-59),
+                (x+f*2, y-55), (x-8, y-61)]
+        pygame.draw.polygon(surface, (225, 212, 178), head)
+        pygame.draw.lines(surface, color, True, head, 2)
+        pygame.draw.line(surface, color, (x-7, y-65), (x+7, y-65), 3)
+        pygame.draw.line(surface, PAPER, (x+f*2, y-66), (x+f*5, y-66), 1)
+        hat = [(x-24, y-72), (x-3, y-88), (x+23, y-72),
+               (x+10, y-69), (x-13, y-69)]
+        pygame.draw.polygon(surface, (193, 164, 111), hat)
+        pygame.draw.polygon(surface, (229, 210, 164), hat[:3])
+        pygame.draw.lines(surface, color, True, hat, 2)
+        for offset in (-14, -7, 2, 9, 16):
+            pygame.draw.line(surface, (140, 111, 80), (x-3, y-86),
+                             (x+offset, y-73), 1)
+        shoulders = [(x-10, y-57), (x+11, y-57), (x+26, y-44),
+                     (x+19, y-28), (x+10, y-33), (x-8, y-32),
+                     (x-20, y-28), (x-26, y-43)]
+        pygame.draw.polygon(surface, (116, 132, 139), shoulders)
+        pygame.draw.lines(surface, color, True, shoulders, 2)
+        coat = [(x-11, y-54), (x+11, y-54), (x+16, y-24), (x-16, y-24)]
+        pygame.draw.polygon(surface, (216, 210, 188), coat)
+        pygame.draw.lines(surface, color, True, coat, 2)
+        pygame.draw.polygon(surface, (167, 176, 169),
+                            [(x-10, y-53), (x+5, y-33), (x+12, y-51), (x+12, y-27)])
+        pygame.draw.lines(surface, color, False,
+                          [(x-9, y-54), (x+4, y-35), (x+11, y-52)], 2)
+        pygame.draw.line(surface, (137, 69, 62), (x-16, y-27), (x+16, y-27), 5)
         stride = round(math.sin(self.time*13)*min(8, abs(self.vx)*.02))
         for side in (-1, 1):
-            foot = x+side*23+side*stride
-            pygame.draw.lines(surface, color, False,
-                [(x+side*12, y-18), (x+side*18-side*stride//2, y-9), (foot, y)], 4)
+            foot = x+side*19+side*stride
+            panel = [(x+side*2, y-24), (x+side*15, y-24),
+                     (foot+side*6, y-6), (foot-side*7, y-5), (x+side*3, y-12)]
+            pygame.draw.polygon(surface, (87, 104, 114), panel)
+            pygame.draw.lines(surface, color, True, panel, 2)
+            pygame.draw.line(surface, (154, 165, 165), (x+side*9, y-22),
+                             (foot+side*1, y-8), 1)
+            pygame.draw.line(surface, color, (foot, y-5), (foot, y-1), 3)
+            pygame.draw.line(surface, color, (foot-side*4, y), (foot+side*8, y), 3)
         p = self.pose_progress
         if self.state == "draw_cut":
             swing = 1-(1-min(1, p*2.5))**3
@@ -2082,10 +2288,23 @@ class InkSamurai(AdvancedEnemy):
             reach = 83-round(ease*42)
         else:
             sword_y, reach = y-19, 41
-        pygame.draw.line(surface, (75, 73, 72), (x - self.facing * 9, sword_y),
-                         (x + self.facing * reach, sword_y - (17 if self.state == "draw_cut" else 4)), 5)
-        pygame.draw.line(surface, (177, 67, 64), (x - self.facing * 15, sword_y - 7),
-                         (x + self.facing * 3, sword_y + 7), 3)
+        grip = (x+f*7, sword_y)
+        elbow = (x+f*21, y-38)
+        pygame.draw.lines(surface, color, False, [(x+f*19, y-44), elbow, grip], 4)
+        pygame.draw.circle(surface, (225, 212, 178), grip, 4)
+        pygame.draw.circle(surface, color, grip, 4, 1)
+        tip = (x+f*reach, sword_y-(17 if self.state == "draw_cut" else 4))
+        if self.state in {"draw_cut", "recover"}:
+            blade = [(grip[0]+f*6, grip[1]-2), tip,
+                     (tip[0]-f*7, tip[1]+4), (grip[0]+f*6, grip[1]+3)]
+            pygame.draw.polygon(surface, (224, 230, 217), blade)
+            pygame.draw.lines(surface, color, True, blade, 2)
+            pygame.draw.line(surface, PAPER, (grip[0]+f*9, grip[1]-1), tip, 1)
+        else:
+            pygame.draw.line(surface, (79, 70, 69), grip, tip, 5)
+            pygame.draw.line(surface, (166, 114, 76), grip, tip, 2)
+        pygame.draw.line(surface, (177, 67, 64), (grip[0]+f*6, grip[1]-6),
+                         (grip[0]+f*6, grip[1]+6), 3)
         if self.state == "sheath":
             self._draw_telegraph(surface, camera, renderer, "DRAW")
         for projectile in self.projectiles:
@@ -2108,7 +2327,8 @@ class OrigamiDrone(AdvancedEnemy):
     def _think(self, dt, ctx, bounds):
         del bounds
         distance = ctx.player.center_x - self.x
-        self.facing = 1 if distance > 0 else -1
+        if self.state in ("hover", "rise", "overheat"):
+            self.facing = 1 if distance > 0 else -1
         if self.state == "hover":
             self.vx += max(-100, min(100, distance)) * dt * 1.1
             self.y += (self.hover_y + math.sin(self.time * 4.4 + self.seed) * 13 - self.y) * min(1, dt * 5)
@@ -2141,13 +2361,32 @@ class OrigamiDrone(AdvancedEnemy):
         color = self._base_color()
         wing = (round(9*self.pose_progress) if self.state == "scan" else
                 -12 if self.state == "overheat" else round(math.sin(self.time * 15) * 5))
-        body = [(x, y - 30), (x + 25, y - 14), (x, y - 5), (x - 25, y - 14)]
-        pygame.draw.polygon(surface, (216, 218, 207), body)
-        pygame.draw.lines(surface, color, True, body, 2)
-        pygame.draw.line(surface, color, (x - 25, y - 14), (x - 37, y - 25 - wing), 2)
-        pygame.draw.line(surface, color, (x + 25, y - 14), (x + 37, y - 25 + wing), 2)
-        pygame.draw.circle(surface, (159, 55, 58), (x, y - 15), 6, 2)
-        pygame.draw.circle(surface, color, (x, y - 15), 2)
+        for side in (-1, 1):
+            tip_y = y-33-wing*side
+            panel = [(x+side*7,y-27),(x+side*41,tip_y),
+                     (x+side*28,y-9),(x+side*10,y-11)]
+            pygame.draw.polygon(surface, (184,198,191) if side < 0 else (222,207,174), panel)
+            pygame.draw.polygon(surface, (125,153,153),
+                [panel[0],panel[1],(x+side*23,y-19)])
+            pygame.draw.lines(surface,color,True,panel,2)
+            pygame.draw.line(surface,color,panel[1],panel[3],1)
+            pygame.draw.line(surface,(239,235,210),
+                (x+side*12,y-25),(x+side*33,tip_y+3),1)
+            for tick in (15,21,27):
+                pygame.draw.line(surface,(125,134,126),
+                    (x+side*tick,y-14),(x+side*(tick+4),y-19),1)
+        body = [(x, y-35),(x+12,y-23),(x+9,y-9),
+                (x,y-2),(x-9,y-9),(x-12,y-23)]
+        pygame.draw.polygon(surface,(230,227,205),body)
+        pygame.draw.polygon(surface,(165,172,158),[body[0],body[-1],body[-2],body[3]])
+        pygame.draw.lines(surface,color,True,body,2)
+        pygame.draw.line(surface,color,(x,y-35),(x,y-23),2)
+        pygame.draw.line(surface,color,(x,y-9),(x,y-2),2)
+        pygame.draw.circle(surface,(71,75,78),(x,y-17),7)
+        pygame.draw.circle(surface,(159,55,58),(x,y-17),4)
+        pygame.draw.circle(surface,PAPER,(x+2,y-19),1)
+        pygame.draw.lines(surface,color,False,
+            [(x-5,y-31),(x-7,y-40),(x-3,y-42)],1)
         if self.state == "scan":
             self._draw_telegraph(surface, camera, renderer, "BEEP")
             pygame.draw.line(surface, (159, 55, 58), (x, y - 15),
@@ -2197,17 +2436,66 @@ class GoblinScribble(AdvancedEnemy):
             return
         x, y = camera.screen_x(self.x), round(self.y + camera.offset_y)
         color = self._base_color()
-        head = [(x - 18, y - 42), (x - 34, y - 48), (x - 22, y - 29),
-                (x - 12, y - 17), (x + 19, y - 22), (x + 28, y - 46),
-                (x + 11, y - 40)]
-        pygame.draw.polygon(surface, (221, 214, 188), head)
-        pygame.draw.lines(surface, color, True, head, 3)
-        pygame.draw.circle(surface, color, (x + self.facing * 8, y - 33), 3)
-        pygame.draw.arc(surface, color, (x - 11, y - 30, 22, 13), 0, math.pi, 2)
-        pygame.draw.line(surface, color, (x - 12, y - 17), (x - 19, y), 4)
-        pygame.draw.line(surface, color, (x + 12, y - 17), (x + 20, y), 4)
-        pygame.draw.line(surface, (102, 74, 45), (x - self.facing * 7, y - 24),
-                         (x + self.facing * 32, y - 48), 6)
+        crouch = round(self.pose_progress*6) if self.state == "snicker" else 0
+        f = self.facing
+        lean = 7 if self.state == "pounce" else 0
+        def point(dx, dy):
+            return x+f*dx, y+dy+crouch
+        # A hunched torso, long asymmetric ears and crooked knees belong to
+        # one creature. Its face no longer floats in an undifferentiated wedge.
+        torso = [point(-15,-32), point(9,-31), point(18,-18),
+                 point(5,-10), point(-15,-15), point(-21,-24)]
+        pygame.draw.polygon(surface, (132, 137, 99), torso)
+        pygame.draw.lines(surface, color, True, torso, 2)
+        pygame.draw.polygon(surface, (191, 169, 123),
+            [point(-13,-27), point(4,-25), point(7,-12), point(-13,-16)])
+        pygame.draw.lines(surface, color, False,
+                          [point(-12,-29), point(3,-22), point(6,-12)], 2)
+        ears = ([point(-13+lean,-41), point(-32+lean,-54), point(-25+lean,-32)],
+                [point(10+lean,-43), point(28+lean,-53), point(18+lean,-29)])
+        for ear in ears:
+            pygame.draw.polygon(surface, (183, 187, 134), ear)
+            pygame.draw.lines(surface, color, True, ear, 2)
+            pygame.draw.line(surface, (134, 115, 90), ear[0], ear[1], 1)
+        head = [point(-13+lean,-45), point(-5+lean,-51), point(13+lean,-45),
+                point(18+lean,-34), point(12+lean,-25), point(-4+lean,-25),
+                point(-17+lean,-33)]
+        pygame.draw.polygon(surface, (202, 205, 149), head)
+        pygame.draw.polygon(surface, (157, 165, 113),
+            [head[0], head[-1], head[-2], point(-2+lean,-37)])
+        pygame.draw.lines(surface, color, True, head, 2)
+        for ex in (-6, 8):
+            pygame.draw.line(surface, color, point(ex-4+lean,-41),
+                             point(ex+3+lean,-38), 3)
+            pygame.draw.line(surface, PAPER, point(ex+lean,-38),
+                             point(ex+2+lean,-38), 1)
+        nose = [point(5+lean,-37), point(12+lean,-32), point(3+lean,-32)]
+        pygame.draw.lines(surface, color, False, nose, 1)
+        pygame.draw.line(surface, color, point(-4+lean,-29), point(10+lean,-29), 2)
+        for tooth in (-2, 7):
+            pygame.draw.polygon(surface, PAPER, [point(tooth+lean,-29),
+                point(tooth+3+lean,-29), point(tooth+1+lean,-25)])
+        stride = round(math.sin(self.time*17)*min(9,abs(self.vx)*.024))
+        for side in (-1,1):
+            knee=(x+side*(19+stride),y-11+crouch)
+            toe=(x+side*25-side*stride,y)
+            pygame.draw.lines(surface,color,False,[(x+side*11,y-18),knee,toe],3)
+            pygame.draw.line(surface,color,toe,(toe[0]+side*9,toe[1]-1),2)
+            pygame.draw.line(surface,(126,130,90),(knee[0]-side*2,knee[1]-3),
+                             (toe[0]-side*2,toe[1]-3),2)
+        pygame.draw.line(surface, (116, 81, 59), point(-14,-17), point(12,-16), 3)
+        handle=(x-self.facing*7,y-24)
+        tip=(x+self.facing*35,y-51)
+        pygame.draw.lines(surface,color,False,
+            [point(-12,-27),point(-22,-17),handle],3)
+        pygame.draw.line(surface,(147,104,55),handle,(tip[0]-self.facing*8,tip[1]+5),6)
+        pygame.draw.circle(surface,(191,194,134),handle,4)
+        pygame.draw.circle(surface,color,handle,4,1)
+        pygame.draw.polygon(surface,PAPER,[tip,(tip[0]-self.facing*13,tip[1]+3),
+                                          (tip[0]-self.facing*6,tip[1]+13)])
+        pygame.draw.polygon(surface,color,[tip,(tip[0]-self.facing*13,tip[1]+3),
+                                          (tip[0]-self.facing*6,tip[1]+13)],1)
+        pygame.draw.line(surface,color,tip,(tip[0]-self.facing*4,tip[1]+4),3)
         if self.state == "snicker":
             self._draw_telegraph(surface, camera, renderer, "HEH")
         for projectile in self.projectiles:
@@ -2222,7 +2510,8 @@ class InkOutlaw(AdvancedEnemy):
     def _think(self, dt, ctx, bounds):
         del bounds
         distance = ctx.player.center_x - self.x
-        self.facing = 1 if distance > 0 else -1
+        if self.state == "idle":
+            self.facing = 1 if distance > 0 else -1
         if self.state == "idle":
             if abs(distance) < 210:
                 self.vx -= self.facing * 520 * dt
@@ -2279,7 +2568,8 @@ class TumbleweedThing(AdvancedEnemy):
     def _think(self, dt, ctx, bounds):
         del bounds
         distance = ctx.player.center_x - self.x
-        self.facing = 1 if distance > 0 else -1
+        if self.state == "idle":
+            self.facing = 1 if distance > 0 else -1
         if self.state == "idle" and self.state_time <= 0:
             self._set_state("rustle", .72)
         elif self.state == "rustle":
@@ -2327,7 +2617,8 @@ class StarScout(AdvancedEnemy):
     def _think(self, dt, ctx, bounds):
         del bounds
         distance = ctx.player.center_x - self.x
-        self.facing = 1 if distance > 0 else -1
+        if self.state == "orbit":
+            self.facing = 1 if distance > 0 else -1
         if self.state == "orbit":
             self.vx += max(-120, min(120, distance)) * dt
             self.y += (self.hover_y + math.sin(self.time * 3.2 + self.seed) * 22 - self.y) * min(1, dt * 4)
@@ -2344,12 +2635,25 @@ class StarScout(AdvancedEnemy):
             return
         x, y = camera.screen_x(self.x), round(self.y + camera.offset_y)
         color = self._base_color()
-        pygame.draw.ellipse(surface, (204, 218, 221), (x - 25, y - 31, 50, 31))
-        pygame.draw.ellipse(surface, color, (x - 25, y - 31, 50, 31), 2)
-        pygame.draw.arc(surface, (81, 103, 128), (x - 39, y - 37, 78, 42), .1, math.pi - .1, 2)
-        pygame.draw.arc(surface, (81, 103, 128), (x - 39, y - 37, 78, 42), math.pi + .1, math.tau - .1, 2)
-        pygame.draw.circle(surface, (159, 55, 58), (x, y - 16), 5, 2)
-        pygame.draw.circle(surface, color, (x, y - 16), 2)
+        # A folded five-point survey star, recognisable beside the drone's
+        # wide wings and the lantern's hanging body even without color.
+        turn = .10*math.sin(self.time*2.4) if self.state == "orbit" else 0
+        points=[]
+        for index in range(10):
+            angle=-math.pi/2+index*math.pi/5+turn
+            radius=31 if index%2==0 else 12
+            points.append((x+math.cos(angle)*radius,y-20+math.sin(angle)*radius*.72))
+        pygame.draw.polygon(surface,(204,218,221),points)
+        pygame.draw.lines(surface,color,True,points,2)
+        for index in range(0,10,2):
+            pygame.draw.line(surface,(106,129,141),points[index],(x,y-20),1)
+        pygame.draw.arc(surface,(81,103,128),(x-40,y-40,80,40),.16,math.pi-.16,1)
+        pygame.draw.circle(surface,(159,55,58),(x+self.facing*3,y-20),6,2)
+        pygame.draw.circle(surface,color,(x+self.facing*3,y-20),2)
+        # Long measuring feelers point at its committed sightline.
+        pygame.draw.lines(surface,color,False,[(x-self.facing*7,y-11),
+                                               (x-self.facing*20,y+1),
+                                               (x-self.facing*29,y+3)],2)
         if self.state == "lock":
             self._draw_telegraph(surface, camera, renderer, "LOCK")
         for projectile in self.projectiles:
@@ -2365,7 +2669,8 @@ class MoonBot(AdvancedEnemy):
     def _think(self, dt, ctx, bounds):
         del bounds
         distance = ctx.player.center_x - self.x
-        self.facing = 1 if distance > 0 else -1
+        if self.state == "idle":
+            self.facing = 1 if distance > 0 else -1
         if self.state == "idle":
             self.vx += self.facing * (1120 if abs(distance) > 125 else -190) * dt
             if abs(distance) < 105 and self.state_time <= 0:
@@ -2394,7 +2699,10 @@ class MoonBot(AdvancedEnemy):
         x, y = camera.screen_x(self.x), round(self.y + camera.offset_y)
         color = self._base_color()
         pygame.draw.rect(surface, (205, 213, 211), (x - 27, y - 58, 54, 49), border_radius=9)
-        pygame.draw.rect(surface, color, (x - 27, y - 58, 54, 49), 3, border_radius=9)
+        renderer.rough_rect(surface, color, pygame.Rect(x - 27, y - 58, 54, 49), 3, self.seed)
+        for hatch in range(4):
+            pygame.draw.line(surface,(134,146,142),(x-22+hatch*9,y-16),
+                             (x-16+hatch*9,y-23),2)
         pygame.draw.ellipse(surface, (231, 232, 216), (x - 20, y - 67, 40, 27))
         pygame.draw.ellipse(surface, (82, 104, 126), (x - 20, y - 67, 40, 27), 3)
         pygame.draw.circle(surface, (159, 55, 58), (x + self.facing * 8, y - 54), 4)
@@ -2659,30 +2967,53 @@ class CometHound(AdvancedEnemy):
             return
         x, y = camera.screen_x(self.x), round(self.y + camera.offset_y)
         color = self._base_color()
-        body = [(x - 30, y - 35), (x + 12, y - 43),
-                (x + 31, y - 27), (x + 15, y - 11), (x - 28, y - 13)]
-        pygame.draw.polygon(surface, (205, 218, 221), body)
-        pygame.draw.lines(surface, color, True, body, 3)
-        head_x = x + self.facing * 30
-        pygame.draw.polygon(surface, (229, 231, 216),
-                            [(head_x, y - 44), (head_x + self.facing * 20, y - 30),
-                             (head_x, y - 17), (head_x - self.facing * 9, y - 30)])
-        pygame.draw.lines(surface, color, True,
-                          [(head_x, y - 44), (head_x + self.facing * 20, y - 30),
-                           (head_x, y - 17), (head_x - self.facing * 9, y - 30)], 3)
-        pygame.draw.circle(surface, (158, 57, 55),
-                           (head_x + self.facing * 7, y - 31), 3)
+        f = self.facing
+        def point(dx, dy):
+            return x+f*dx,y+dy
+        tail_length = 82 if self.state == "comet_dash" else 57
+        tail = [point(-23,-31),point(-tail_length,-52),
+                point(-tail_length+14,-30),point(-tail_length+2,-15),point(-26,-19)]
+        pygame.draw.polygon(surface,(109,154,169),tail)
+        pygame.draw.lines(surface,color,True,tail,2)
+        pygame.draw.polygon(surface,(211,197,146),
+            [point(-28,-29),point(-tail_length+9,-44),point(-43,-27)])
+        for distance in (37,46,55):
+            pygame.draw.line(surface,(69,109,129),point(-distance,-33),
+                             point(-distance-10,-38),1)
+        # Tucked waist, raised shoulder and jointed legs read as a lean hound.
+        body = [point(-32,-29),point(-22,-42),point(-6,-37),point(15,-45),
+                point(29,-34),point(23,-14),point(6,-13),point(-7,-20),point(-27,-16)]
+        pygame.draw.polygon(surface,(197,215,216),body)
+        pygame.draw.polygon(surface,(115,155,165),
+            [body[0],body[1],body[2],point(-10,-27),body[-1]])
+        pygame.draw.polygon(surface,(229,231,208),
+            [point(6,-34),body[3],body[4],body[5],point(10,-18)])
+        pygame.draw.lines(surface,color,True,body,2)
+        pygame.draw.lines(surface,(110,146,152),False,
+            [point(-20,-34),point(-8,-28),point(4,-30)],1)
+        head = [point(23,-43),point(24,-57),point(34,-47),point(42,-44),
+                point(53,-32),point(47,-26),point(28,-25),point(20,-34)]
+        pygame.draw.polygon(surface,(225,229,211),head)
+        pygame.draw.polygon(surface,(132,164,163),
+            [head[0],head[-1],head[-2],point(34,-35)])
+        pygame.draw.lines(surface,color,True,head,2)
+        pygame.draw.line(surface,color,point(34,-41),point(43,-37),3)
+        pygame.draw.line(surface,(177,68,59),point(37,-38),point(41,-37),2)
+        pygame.draw.circle(surface,color,point(51,-32),3)
+        pygame.draw.lines(surface,color,False,
+            [point(48,-29),point(39,-30),point(34,-27)],2)
+        pygame.draw.polygon(surface,PAPER,
+            [point(42,-30),point(45,-30),point(43,-26)])
         for index, leg_x in enumerate((-22, -5, 12, 25)):
             stride = math.sin(self.time*(24 if self.state == "comet_dash" else 10)+index*math.pi*.7)
             step = round(stride*min(12, abs(self.vx)*.025))
             crouch = round(self.pose_progress*5) if self.state == "tail_warn" else 0
-            pygame.draw.lines(surface, color, False,
-                [(x+leg_x, y-13), (x+leg_x+step//2, y-7+crouch),
-                 (x+leg_x-self.facing*7+step, y-max(0,step//3))], 4)
-        tail_end = x - self.facing * (92 if self.state == "comet_dash" else 57)
-        pygame.draw.lines(surface, (82, 105, 128), False,
-                          [(x - self.facing * 29, y - 27),
-                           (tail_end, y - 43), (tail_end + self.facing * 11, y - 25)], 4)
+            hip=point(leg_x,-15)
+            knee=point(leg_x+step//2+(-5 if index<2 else 4),-8+crouch)
+            toe=point(leg_x-7+step,-max(0,step//3))
+            pygame.draw.lines(surface,color,False,[hip,knee,toe],3)
+            pygame.draw.line(surface,(148,174,174),hip,knee,1)
+            pygame.draw.line(surface,color,toe,(toe[0]+f*7,toe[1]),2)
         if self.state == "tail_warn":
             self._draw_telegraph(surface, camera, renderer,
                                  ">>>" if self.facing > 0 else "<<<")
@@ -2984,6 +3315,7 @@ class MoonCompassBoss(AdvancedEnemy):
     base_hp = 8
     is_boss = True
     block_hint = "JUMP THE RED ARC — STRIKE WHILE THE BLADE IS STUCK"
+    attack_repertoire = ("sweep", "return_sweep", "needle_thrust")
 
     def __init__(self, x, ground_y=590, seed=1):
         super().__init__(x, ground_y, seed)
@@ -2993,6 +3325,7 @@ class MoonCompassBoss(AdvancedEnemy):
         self.anchor_x = self.x
         self.vault_x = self.x
         self.sweep_count = 0
+        self.measure_count = 0
         self._set_state("compass_measure", .75)
 
     def _is_vulnerable(self):
@@ -3025,6 +3358,9 @@ class MoonCompassBoss(AdvancedEnemy):
     def _blade_points(self, angle=None):
         angle = self.angle if angle is None else angle
         root = (self.x, self.y - 111)
+        if self.state in ("needle_thrust_warn", "needle_thrust"):
+            reach = 250 if self.state.endswith("warn") else 150 + 100 * self.pose_progress
+            return root, (root[0] + self.facing * reach, root[1])
         # The sliding leg shortens against the sheet; the needle never
         # protrudes below the floor while its hinge stays planted.
         length = min(150,111/max(.001,math.sin(angle))) if math.sin(angle)>0 else 150
@@ -3046,8 +3382,25 @@ class MoonCompassBoss(AdvancedEnemy):
             if self.state_time <= 0 and abs(distance) <= 120:
                 self.vx = 0
                 self.anchor_x = self.x
-                self._set_state("sweep_telegraph", .82)
+                self.measure_count += 1
+                next_attack = ("needle_thrust_warn" if self.measure_count % 3 == 0
+                               else "sweep_telegraph")
+                self._set_state(next_attack, .92 if next_attack.endswith("warn") else .82)
                 ctx.sounds.play("katana_draw")
+        elif self.state == "needle_thrust_warn" and self.state_time <= 0:
+            self._set_state("needle_thrust", .42)
+            ctx.sounds.play("compass_sweep")
+        elif self.state == "needle_thrust":
+            self.x = self.anchor_x
+            a, b = self._blade_points()
+            if (self.attack_suppressed <= 0 and
+                    ctx.player.rect.inflate(6, 6).clipline(a, b) and
+                    ctx.player.hurt(self.x)):
+                ctx.sounds.play("ink")
+                ctx.camera.kick(4, .15)
+                _player_hit_feedback(ctx, self.x)
+            if self.state_time <= 0:
+                self._pin_needle(ctx)
         elif self.state == "sweep_telegraph" and self.state_time <= 0:
             self.sweep_count += 1
             self._set_state("sweep", .72 if self.hp > 2 else .6)
@@ -3155,16 +3508,34 @@ class MoonCompassBoss(AdvancedEnemy):
             pygame.draw.lines(surface, red, False, path, 2)
             for i in range(0, 25, 4):
                 pygame.draw.circle(surface, red, path[i], 3, 1)
+            direction = self.facing * (-1 if self.state in ("return_telegraph", "return_sweep") else 1)
+            for i in (4, 20):
+                point = pygame.Vector2(path[i])
+                tangent = pygame.Vector2(path[i + direction]) - point
+                if tangent.length_squared():
+                    tangent = tangent.normalize()
+                    normal = pygame.Vector2(-tangent.y, tangent.x)
+                    pygame.draw.lines(surface, red, False,
+                                      [point-tangent*8+normal*4, point,
+                                       point-tangent*8-normal*4], 2)
             if self.state == "sweep_telegraph":
-                self._draw_telegraph(surface, camera, renderer, "JUMP THE ARC")
+                self._draw_telegraph(surface, camera, renderer, "JUMP THE ARC", 252)
             elif self.state == "return_telegraph":
-                self._draw_telegraph(surface, camera, renderer, "THE ARC RETURNS")
+                self._draw_telegraph(surface, camera, renderer, "THE ARC RETURNS", 252)
             else:
                 for index in range(1, 4):
                     angle = self.angle - self.facing * index * .11
                     _, end_world = self._blade_points(angle)
                     end = (camera.screen_x(end_world[0]),round(end_world[1]+camera.offset_y))
                     pygame.draw.line(surface, (169, 137, 121), hinge, end, 1)
+        elif self.state in ("needle_thrust_warn", "needle_thrust"):
+            end = (x + self.facing * 250, y - 111)
+            _dashed_line(surface, red, hinge, end, 2, 9, 7)
+            pygame.draw.lines(surface, red, False,
+                              [(end[0]-self.facing*12, end[1]-8), end,
+                               (end[0]-self.facing*12, end[1]+8)], 2)
+            if self.state == "needle_thrust_warn":
+                self._draw_telegraph(surface, camera, renderer, "HIGH THRUST — STAY LOW", 252)
         elif self.state in ("compass_vault_warn", "compass_vault"):
             tx = camera.screen_x(self.vault_x)
             floor = round(self.ground_y + camera.offset_y)
@@ -3175,13 +3546,13 @@ class MoonCompassBoss(AdvancedEnemy):
                                      renderer.font_small, -2)
         elif self.state == "stuck":
             renderer.doodle_text(surface, "PINNED!" if self.vulnerable else "RESETTING",
-                                 (x - 38, y - 178), blue,
+                                 (x - 38, y - 252), blue,
                                  renderer.font_small, -2)
             self._draw_opening(surface, hinge, 36)
         if self.phase == 2:
-            renderer.doodle_text(surface, "II / RETRACE", (x - 45, y - 205), red,
+            renderer.doodle_text(surface, "II / RETRACE", (x - 45, y - 213), red,
                                  renderer.font_small, 1)
-        _health_scratches(surface, camera, self, 151)
+        _health_scratches(surface, camera, self, 187)
 
 
 def _draw_wanted_poster(surface, camera, renderer, x_world, ground_y, seed,
@@ -3196,7 +3567,15 @@ def _draw_wanted_poster(surface, camera, renderer, x_world, ground_y, seed,
     pygame.draw.polygon(surface, (231, 211, 166), border)
     pygame.draw.lines(surface, ink, True, border, 2)
     pygame.draw.line(surface, (161, 134, 98), (x - 30, y - 108), (x + 25, y - 110), 1)
-    renderer.doodle_text(surface, "WANTED", (x - 30, y - 109), ink, renderer.font_small, -2)
+    # Fit both WANTED and ARANIYOR inside the same paper header. Re-render
+    # the small letters at native scale instead of squeezing a large label.
+    from localization import translate
+    if not hasattr(renderer, "_wanted_heading_font"):
+        face = pygame.font.match_font("arial,dejavusans,liberationsans")
+        renderer._wanted_heading_font = pygame.font.Font(face, 12)
+    heading = renderer._wanted_heading_font.render(translate("WANTED"), True, ink)
+    heading = pygame.transform.rotate(heading, -2)
+    surface.blit(heading, heading.get_rect(midtop=(x - 2, y - 110)))
     head = (x + sway, y - 71)
     rough_circle(surface, ink, head, 11, seed, 2, 1)
     pygame.draw.line(surface, ink, (head[0] - 19, y - 78), (head[0] + 19, y - 78), 3)
@@ -3241,7 +3620,7 @@ class BountyDecoy:
 
     def hit_from_weapon(self, amount, knockback, source_x, tags, ctx):
         del amount, knockback, source_x, tags
-        if self.dead:
+        if self.dead or getattr(self.owner, "artist_erasing", False):
             return False
         self.dead = True
         self.hp = 0
@@ -3258,6 +3637,7 @@ class WantedSketchBoss(AdvancedEnemy):
     is_boss = True
     uses_gravity = False
     block_hint = "THE WET INK IS REAL — SHOOT BEFORE THE DRAW"
+    attack_repertoire = ("bounty_volley", "bounty_crossfire", "bounty_ricochet")
 
     def __init__(self, x, ground_y=590, seed=1):
         super().__init__(x, ground_y, seed)
@@ -3270,6 +3650,8 @@ class WantedSketchBoss(AdvancedEnemy):
         self.volley = 0
         self.old_x = self.x
         self.window_hits = 0
+        self.bounty_pattern = "bounty_volley"
+        self.ricochet_bounds = (self.x - 400, self.x + 400)
         self._set_state("poster_shuffle", .6)
 
     def _is_vulnerable(self):
@@ -3280,6 +3662,10 @@ class WantedSketchBoss(AdvancedEnemy):
         if dealt:
             # Accuracy interrupts the real outlaw. Surviving paper copies
             # tear up with it, so there is no lingering invisible attack.
+            for shot in self.projectiles:
+                if shot.life > 0:
+                    ctx.particles.pencil_speck(shot.x, shot.y)
+            self.projectiles.clear()
             for decoy in self.combat_targets:
                 if not decoy.dead:
                     ctx.particles.enemy_break(decoy.x, decoy.y - 60, self.facing, 6)
@@ -3330,6 +3716,15 @@ class WantedSketchBoss(AdvancedEnemy):
         for actor, target in zip(actors, self.shot_targets):
             actor.bounty_target = target
         self.volley = 0
+        self.bounty_pattern = ("bounty_ricochet" if self.shuffle_index % 2 == 0 else
+                               "bounty_crossfire" if self.phase >= 2 else "bounty_volley")
+        self.ricochet_bounds = bounds
+        if self.bounty_pattern == "bounty_ricochet":
+            middle_x = (bounds[0] + bounds[1]) * .5
+            for actor in actors:
+                edge = bounds[0] if actor.x <= middle_x else bounds[1]
+                actor.bounty_target = (edge, self.ground_y - 24)
+            self.facing = -1 if self.x <= middle_x else 1
         self._set_state("bounty_draw", 1.15 if self.hp > 2 else .95)
         ctx.sounds.play("stamp")
         ctx.level.toast = "The wet ink moves. The copies don't."
@@ -3340,28 +3735,36 @@ class WantedSketchBoss(AdvancedEnemy):
         if self.state in ("poster_shuffle", "poster_escape", "bounty_rewrite") and self.state_time <= 0:
             self._shuffle(ctx, bounds)
         elif self.state == "bounty_draw" and self.state_time <= 0:
-            self._set_state("bounty_volley", .7)
+            self._set_state("bounty_volley", (2.05 if self.phase >= 2 else 1.85)
+                            if self.bounty_pattern == "bounty_ricochet" else .7)
             self.shot_timer = 0
         elif self.state == "bounty_volley":
             self.shot_timer -= dt
-            volley_limit = 3 if self.phase >= 2 else 2
+            bounced = self.bounty_pattern == "bounty_ricochet"
+            volley_limit = (2 if self.phase >= 2 else 1) if bounced else (3 if self.phase >= 2 else 2)
             if self.shot_timer <= 0 and self.volley < volley_limit:
                 self.shot_timer = .24 if self.phase >= 2 else .30
                 self.volley += 1
                 actors = [self] + [copy for copy in self.combat_targets if not copy.dead]
                 for index, actor in enumerate(actors):
-                    origin = pygame.Vector2(actor.x, actor.y - 56)
+                    origin = pygame.Vector2(actor.x, actor.y - (24 if bounced else 56))
                     target = getattr(actor, "bounty_target", self.shot_target)
                     vector = pygame.Vector2(target) - origin
                     if vector.length_squared() < 1:
                         vector.update(self.facing, 0)
-                    vector = vector.normalize() * 470
+                    vector = vector.normalize() * (380 if bounced else 470)
                     self.projectiles.append(PaperProjectile(
-                        origin.x, origin.y, vector.x, vector.y, "ink", 3.1, 5, 0,
-                        terrain_collision=False))
+                        origin.x, origin.y, vector.x, vector.y,
+                        "bounty_slug" if bounced else "ink", 3.1, 5, 0,
+                        terrain_collision=False,
+                        ricochet_bounds=bounds if bounced else None,
+                        bounces_left=1 if bounced else 0))
                 ctx.sounds.play("ink_burst")
             if self.state_time <= 0:
+                # The paper settles before the announced punish window.
+                self.projectiles.clear()
                 self._set_state("unravel", 1.55)
+                ctx.sounds.play("boss_opening")
         elif self.state == "unravel" and self.state_time <= 0:
             for copy in self.combat_targets:
                 copy.dead = True
@@ -3373,7 +3776,7 @@ class WantedSketchBoss(AdvancedEnemy):
             return
         for copy in self.combat_targets:
             if not copy.dead:
-                facing = 1 if self.shot_target[0] > copy.x else -1
+                facing = 1 if getattr(copy, "bounty_target", self.shot_target)[0] > copy.x else -1
                 _draw_wanted_poster(surface, camera, renderer, copy.x, copy.y,
                                     copy.seed, facing, self.time,
                                     firing=self.state == "bounty_volley")
@@ -3397,17 +3800,29 @@ class WantedSketchBoss(AdvancedEnemy):
                 target = (camera.screen_x(target_world[0]),
                           round(target_world[1] + camera.offset_y))
                 _dashed_line(surface, (166, 107, 84), (ax, y - 56), target, 1, 6, 9)
+            if self.bounty_pattern == "bounty_ricochet":
+                left, right = (camera.screen_x(edge) for edge in self.ricochet_bounds)
+                floor_y = round(self.ground_y - 24 + camera.offset_y)
+                _dashed_line(surface, RED_RULE, (left, floor_y), (right, floor_y), 2, 9, 8)
+                for edge, facing in ((left, 1), (right, -1)):
+                    pygame.draw.lines(surface, RED_RULE, False,
+                                      [(edge+facing*12, floor_y-8), (edge, floor_y),
+                                       (edge+facing*12, floor_y+8)], 2)
+                self._draw_telegraph(surface, camera, renderer, "LOW RICOCHET — JUMP OR RETURN", 222)
         # Every poster carries the same timing mark. It must not reveal which
         # of the drawings is alive; wet moving ink remains the tell.
         for actor in [self] + [copy for copy in self.combat_targets if not copy.dead]:
             self._draw_opening(surface, (camera.screen_x(actor.x), y - 54), 24)
+            if self.phase == 2:
+                # Phase captions follow the copies too. Only wet moving ink
+                # should identify which drawing can interrupt the volley.
+                renderer.doodle_text(surface, "DEAD / ALIVE",
+                                     (camera.screen_x(actor.x) - 45, y - 179),
+                                     RED_RULE, renderer.font_small, 1)
         if self.state == "poster_escape":
             for offset in (-25, 0, 25):
                 pygame.draw.line(surface, (158, 139, 110),
                                  (x + offset, y - 95), (x + offset + self.facing * 36, y - 127), 2)
-        if self.phase == 2:
-            renderer.doodle_text(surface, "DEAD / ALIVE", (x - 45, y - 145),
-                                 RED_RULE, renderer.font_small, 1)
         _health_scratches(surface, camera, self, 151)
         for shot in self.projectiles:
             shot.draw(surface, camera)
@@ -3426,6 +3841,7 @@ class RailroadStaplerBoss(AdvancedEnemy):
     is_boss = True
     contact_states = ("rail_rush",)
     block_hint = "JUMP THE RAIL — HIT THE REAR OR THE OPEN ENGINE"
+    attack_repertoire = ("rail_rush", "return_rush", "staple_columns", "staple_crossfire")
 
     def __init__(self, x, ground_y=590, seed=1):
         super().__init__(x, ground_y, seed)
@@ -3437,6 +3853,8 @@ class RailroadStaplerBoss(AdvancedEnemy):
         self.rear_hit = False
         self.rush_passes = 0
         self.wheel_angle = 0
+        self.brake_count = 0
+        self.cross_lanes = []
         self._set_state("rail_approach", .7)
 
     def _is_vulnerable(self):
@@ -3474,10 +3892,15 @@ class RailroadStaplerBoss(AdvancedEnemy):
     def _brake(self, ctx, bounds):
         self.vx = 0
         self.window_hits = 0
-        center = max(bounds[0] - 25, min(bounds[1] + 5, ctx.player.center_x))
-        self.lanes = [center - 150, center, center + 150]
+        spacing = min(150, max(40, (bounds[1] - bounds[0] - 64) * .5))
+        center = max(bounds[0] + spacing + 28,
+                     min(bounds[1] - spacing - 28, ctx.player.center_x))
+        self.lanes = [center - spacing, center, center + spacing]
         self.lane_index = 0
-        self._set_state("staple_columns_warn", 1.05)
+        self.brake_count += 1
+        self.cross_lanes = [self.ground_y - 24, self.ground_y - 124]
+        warning = "staple_cross_warn" if self.brake_count % 2 == 0 else "staple_columns_warn"
+        self._set_state(warning, 1.12 if warning == "staple_cross_warn" else 1.05)
         ctx.sounds.play("reload")
         ctx.camera.kick(3.5, .16)
 
@@ -3519,6 +3942,23 @@ class RailroadStaplerBoss(AdvancedEnemy):
         elif self.state == "staple_columns_warn" and self.state_time <= 0:
             self._set_state("staple_columns", 1.0)
             self.shot_timer = 0
+        elif self.state == "staple_cross_warn" and self.state_time <= 0:
+            self._set_state("staple_crossfire", 1.85)
+            self.shot_timer = 0
+            self.lane_index = 0
+        elif self.state == "staple_crossfire":
+            self.shot_timer -= dt
+            if self.shot_timer <= 0 and self.lane_index < len(self.cross_lanes):
+                lane_y = self.cross_lanes[self.lane_index]
+                for source_x, velocity in ((bounds[0] - 35, 460), (bounds[1] + 35, -460)):
+                    self.projectiles.append(PaperProjectile(
+                        source_x, lane_y, velocity, 0, "staple", 2.0, 6, 0,
+                        terrain_collision=False))
+                self.lane_index += 1
+                self.shot_timer = .56
+                ctx.sounds.play("staple")
+            if self.state_time <= 0:
+                self._open_engine(ctx)
         elif self.state == "staple_columns":
             self.shot_timer -= dt
             if self.shot_timer <= 0 and self.lane_index < len(self.lanes):
@@ -3529,12 +3969,18 @@ class RailroadStaplerBoss(AdvancedEnemy):
                 self.lane_index += 1
                 ctx.sounds.play("staple")
             if self.state_time <= 0:
-                self._set_state("reload", 2.3)
-                ctx.sounds.play("reload")
+                self._open_engine(ctx)
         elif self.state == "reload" and self.state_time <= 0:
             self.lanes.clear()
             self.rush_passes = 0
             self._set_state("rail_approach", .48)
+
+    def _open_engine(self, ctx):
+        self.projectiles.clear()
+        self.window_hits = 0
+        self.vx = 0
+        self._set_state("reload", 2.3)
+        ctx.sounds.play("boss_opening")
 
     def _after_integrate(self, dt, ctx, bounds, hit_wall, landed):
         del dt, landed
@@ -3609,6 +4055,14 @@ class RailroadStaplerBoss(AdvancedEnemy):
                                    (lx + 14, floor - 5), (lx + 14, floor - 13)], 2)
                 renderer.doodle_text(surface, str(index + 1), (lx - 5, floor - 300),
                                      RED_RULE, renderer.font_small, 0)
+        if self.state in ("staple_cross_warn", "staple_crossfire"):
+            for index, lane_y in enumerate(self.cross_lanes):
+                ly = round(lane_y + camera.offset_y)
+                _dashed_line(surface, RED_RULE, (0, ly), (surface.get_width(), ly), 2, 10, 13)
+                renderer.doodle_text(surface, str(index+1), (25, ly-18),
+                                     RED_RULE, renderer.font_small, 0)
+            if self.state == "staple_cross_warn":
+                self._draw_telegraph(surface, camera, renderer, "LOW THEN HIGH — JUMP, THEN LAND", 195)
         if self.state == "reload":
             renderer.doodle_text(surface, "ENGINE OPEN" if self.vulnerable else "RELOADING",
                                  (x - 59, y - 160),
@@ -3631,6 +4085,7 @@ class OrbitalMistakeBoss(AdvancedEnemy):
     is_boss = True
     contact_states = ("meteor_fall",)
     block_hint = "LET THE SHIELDS GO — HIT THE EXPOSED CORE"
+    attack_repertoire = ("moon_release", "meteor_fall", "impact_shards", "comet_corridor")
 
     def __init__(self, x, ground_y=590, seed=1):
         super().__init__(x, ground_y, seed)
@@ -3642,6 +4097,10 @@ class OrbitalMistakeBoss(AdvancedEnemy):
         self.meteor_x = x
         self.shot_timer = 0
         self.window_hits = 0
+        self.align_count = 0
+        self.comet_lanes = []
+        self.safe_corridor = (self.x - 110, self.x + 110)
+        self.corridor_fired = False
         self._set_state("orbit_align", 1.2)
 
     def _phase_for_hp(self):
@@ -3686,25 +4145,42 @@ class OrbitalMistakeBoss(AdvancedEnemy):
                                              self.shot_target[1] + dy)),
             )
 
-    def _impact_shards(self, ctx):
+    def _shard_vectors(self):
         if self.phase < 2:
-            return
+            return ()
         count = 4 if self.phase == 2 else 6
+        vectors = []
         for index in range(count):
             angle = math.radians(202 + index * (136 / max(1, count - 1)))
             speed = 350 + index % 2 * 45
+            vectors.append((math.cos(angle) * speed, math.sin(angle) * speed))
+        return tuple(vectors)
+
+    def _impact_shards(self, ctx):
+        vectors = self._shard_vectors()
+        for vx, vy in vectors:
             self.projectiles.append(PaperProjectile(
                 self.x, self.ground_y - 18,
-                math.cos(angle) * speed, math.sin(angle) * speed,
+                vx, vy,
                 "moon_shard", 2.5, 7, 260, grace=.15,
                 terrain_collision=False,
             ))
-        ctx.sounds.play("boss_signature")
+        if vectors:
+            ctx.sounds.play("boss_signature")
 
     def _moon_position(self, index):
         angle = self.orbit_angle + index * math.tau / (2 + self.phase)
         return (self.x + math.cos(angle) * 115,
                 self.y - 58 + math.sin(angle) * 55)
+
+    def _prepare_comet_corridor(self, ctx, bounds):
+        center = max(bounds[0] + 120, min(bounds[1] - 120, ctx.player.center_x))
+        self.safe_corridor = (center - 105, center + 105)
+        self.comet_lanes = [float(lane) for lane in range(round(bounds[0]+55), round(bounds[1]-40), 135)
+                            if not center-125 <= lane <= center+125]
+        self.corridor_fired = False
+        self._set_state("comet_corridor_warn", 1.1)
+        ctx.sounds.play("boss_signature")
 
     def _think(self, dt, ctx, bounds):
         # Once the trajectories are shown, moons keep those launch positions
@@ -3723,6 +4199,24 @@ class OrbitalMistakeBoss(AdvancedEnemy):
                 self.vx = self.facing * 145
             self.y += (self.ground_y - 95 + math.sin(self.time * 1.8) * 16 - self.y) * min(1, dt * 3)
             if self.state_time <= 0:
+                self.align_count += 1
+                if self.align_count % 2 == 0:
+                    self._prepare_comet_corridor(ctx, bounds)
+                else:
+                    self._prepare_release_targets(ctx, bounds)
+                    self._set_state("moon_release_warn", 1.0)
+        elif self.state == "comet_corridor_warn" and self.state_time <= 0:
+            self._set_state("comet_corridor", .94)
+        elif self.state == "comet_corridor":
+            if not self.corridor_fired:
+                self.corridor_fired = True
+                for lane in self.comet_lanes:
+                    self.projectiles.append(PaperProjectile(
+                        lane, self.ground_y - 290, 0, 440,
+                        "moon_shard", .72, 9, 0, terrain_collision=False))
+                ctx.sounds.play("ink_burst")
+            if self.state_time <= 0:
+                self.projectiles.clear()
                 self._prepare_release_targets(ctx, bounds)
                 self._set_state("moon_release_warn", 1.0)
         elif self.state == "moon_release_warn" and self.state_time <= 0:
@@ -3745,6 +4239,11 @@ class OrbitalMistakeBoss(AdvancedEnemy):
                 ctx.sounds.play("ink_burst")
             if not self.orbiters:
                 self.window_hits = 0
+                # An exposed, reachable core is a ceasefire, including the
+                # last moon. A shot cannot land after its opening is promised.
+                for shot in self.projectiles:
+                    shot.damage_enabled = False
+                    shot.life = min(shot.life, .35)
                 self._set_state("unravel", 3.0)
                 ctx.sounds.play("boss_opening")
         elif self.state == "unravel":
@@ -3821,7 +4320,7 @@ class OrbitalMistakeBoss(AdvancedEnemy):
             pygame.draw.arc(surface, red, (x - 62, y - 115, 124, 117), .25, 2.2, 2)
             pygame.draw.arc(surface, red, (x - 62, y - 115, 124, 117), 3.45, 5.2, 2)
             renderer.doodle_text(surface, "CORE OPEN" if self.vulnerable else "CORE SEALED",
-                                 (x - 48, y - 184),
+                                 (x - 48, y - 217),
                                  blue, renderer.font_small, -2)
             self._draw_opening(surface, center, 56)
         for plane in range(1, self.phase):
@@ -3835,25 +4334,45 @@ class OrbitalMistakeBoss(AdvancedEnemy):
             rough_circle(surface, ink, (sx, sy), 13, self.seed + index, 2, 1)
             pygame.draw.circle(surface, blue, (sx - 4, sy - 3), 4, 1)
         if self.state == "moon_release_warn":
-            self._draw_telegraph(surface, camera, renderer, "MOONS AWAY")
+            self._draw_telegraph(surface, camera, renderer, "MOONS AWAY", 212)
             for index in self.orbiters:
                 mx, my = self._moon_position(index)
                 target = self.release_targets.get(index, self.shot_target)
                 _dashed_line(surface, red,
                              (camera.screen_x(mx), round(my + camera.offset_y)),
                              (camera.screen_x(target[0]),
-                              round(target[1] + camera.offset_y)), 1, 7, 10)
+                             round(target[1] + camera.offset_y)), 1, 7, 10)
+        if self.state in ("comet_corridor_warn", "comet_corridor"):
+            floor = round(self.ground_y + camera.offset_y)
+            for lane in self.comet_lanes:
+                lx = camera.screen_x(lane)
+                _dashed_line(surface, red, (lx, floor-290), (lx, floor-5), 2, 9, 7)
+                pygame.draw.lines(surface, red, False,
+                                  [(lx-7, floor-23), (lx, floor-12), (lx+7, floor-23)], 2)
+            for edge in self.safe_corridor:
+                lx = camera.screen_x(edge)
+                _dashed_line(surface, blue, (lx, floor-250), (lx, floor-4), 1, 7, 9)
+            if self.state == "comet_corridor_warn":
+                self._draw_telegraph(surface, camera, renderer, "COMET RAIN — KEEP THE BLUE GAP", 212)
         if self.state in ("meteor_warn", "meteor_fall"):
             tx, floor = camera.screen_x(self.meteor_x), round(self.ground_y + camera.offset_y)
             pygame.draw.ellipse(surface, red, (tx - 61, floor - 16, 122, 22), 2)
             correction_cross(surface, (tx, floor - 8), 20, self.seed, red, 2)
             _dashed_line(surface, red, (tx, floor - 300), (tx, floor - 22), 1, 7, 10)
+            # The graph is the landing's complete promise, including its
+            # outward moon shards. These are the same velocities used by the
+            # impact, so later phases never spring an unmarked close-range fan.
+            for vx, vy in self._shard_vectors():
+                start = (tx, floor - 18)
+                end = (tx + round(vx * .32), floor - 18 + round(vy * .32 + 130 * .32 ** 2))
+                _dashed_line(surface, (157, 115, 69), start, end, 2, 7, 7)
+                pygame.draw.circle(surface, (157, 115, 69), end, 3, 1)
             if self.state == "meteor_warn":
                 renderer.doodle_text(surface, "BAD LANDING", (tx - 54, floor - 44),
                                      red, renderer.font_small, -1)
-        renderer.doodle_text(surface, f"ORBIT {self.phase}", (x - 34, y - 151),
+        renderer.doodle_text(surface, f"ORBIT {self.phase}", (x - 34, y - 160),
                              blue, renderer.font_small, 1)
-        _health_scratches(surface, camera, self, 139)
+        _health_scratches(surface, camera, self, 184)
         for shot in self.projectiles:
             shot.draw(surface, camera)
 
@@ -3868,6 +4387,8 @@ class FinalEditorBoss(AdvancedEnemy):
     contact_states = ("counter_cut", "red_stamp")
     block_hint = "READ THE DRAFT — ATTACK WHEN ITS GUARD DROPS"
     drag = 2.2
+    attack_repertoire = ("counter_cut", "red_stamp", "proof_volley", "margin_burst",
+                         "redaction_wall", "erase_columns")
 
     SCENARIO_LABELS = {
         "aggressive": "THE AGGRO MAN / it counted every attack",
@@ -3892,6 +4413,9 @@ class FinalEditorBoss(AdvancedEnemy):
         self.arena_bounds = (self.x - 500, self.x + 500)
         self.redaction_checked = False
         self.shot_index = 0
+        self.stamp_x = self.x
+        self.stamp_start_x = self.x
+        self.erase_lanes = []
         self._set_state("intro", 1.25)
 
     def _phase_for_hp(self):
@@ -3937,28 +4461,29 @@ class FinalEditorBoss(AdvancedEnemy):
         scripts = {
             "aggressive": {
                 1: ("red_stamp",),
-                2: ("red_stamp", "counter_cut"),
-                3: ("redaction_wall", "red_stamp", "counter_cut", "proof_volley"),
+                2: ("red_stamp", "counter_cut", "erase_columns"),
+                3: ("redaction_wall", "red_stamp", "erase_columns", "counter_cut", "proof_volley"),
             },
             "avoidant": {
                 1: ("counter_cut",),
-                2: ("counter_cut", "margin_burst"),
-                3: ("redaction_wall", "margin_burst", "counter_cut", "red_stamp"),
+                2: ("counter_cut", "margin_burst", "erase_columns"),
+                3: ("redaction_wall", "margin_burst", "erase_columns", "counter_cut", "red_stamp"),
             },
             "precise": {
                 1: ("proof_volley",),
-                2: ("proof_volley", "margin_burst"),
-                3: ("redaction_wall", "proof_volley", "red_stamp", "margin_burst"),
+                2: ("proof_volley", "margin_burst", "erase_columns"),
+                3: ("redaction_wall", "proof_volley", "erase_columns", "red_stamp", "margin_burst"),
             },
             "unreadable": {
                 1: ("margin_burst",),
-                2: ("proof_volley", "red_stamp"),
-                3: ("redaction_wall", "counter_cut", "margin_burst", "proof_volley", "red_stamp"),
+                2: ("proof_volley", "red_stamp", "erase_columns"),
+                3: ("redaction_wall", "counter_cut", "erase_columns", "margin_burst", "proof_volley", "red_stamp"),
             },
         }
         return scripts[self.scenario or "unreadable"][self.phase]
 
     def _start_pattern(self, ctx):
+        self.floor_edit_preview = None
         patterns = self._scenario_patterns()
         self.pattern_cursor = (self.pattern_cursor + 1) % len(patterns)
         self.pattern = patterns[self.pattern_cursor]
@@ -3984,7 +4509,32 @@ class FinalEditorBoss(AdvancedEnemy):
                 center = low + (high - low) * (.34 if self.pattern_cursor % 2 else .66)
             center = max(low + half_width + 25, min(high - half_width - 25, center))
             self.safe_margin = (center - half_width, center + half_width)
+        elif self.pattern == "red_stamp":
+            self.stamp_start_x = self.x
+            # The jump is one signed eraser stroke. Its landing and floor
+            # edit are published together instead of tracking a dodge.
+            flight = 1000 / 1150
+            self.stamp_x = max(self.arena_bounds[0] + self.radius,
+                               min(self.arena_bounds[1] - self.radius,
+                                   self.x + self.facing * 175 * flight))
+            self.floor_edit_preview = self._plan_floor_erase(
+                ctx, self.stamp_x, 118 + self.phase * 14, avoid_feet=False)
+        elif self.pattern == "erase_columns":
+            low, high = self.arena_bounds
+            self.erase_lanes = list(dict.fromkeys(
+                max(low+45, min(high-45, self.proof_target[0]+offset))
+                for offset in (-165, 0, 165)))
         duration = .96 if self.pattern == "redaction_wall" else (.72 if self.phase == 1 else .58)
+        if self.pattern == "erase_columns":
+            duration = 1.1
+        if self.pattern == "redaction_wall":
+            # A wider notebook spread must not turn the clean margin into an
+            # unreachable promise. Allow an ordinary run with a reaction beat;
+            # a ready dash remains a faster option, never a requirement.
+            left, right = self.safe_margin
+            destination = max(left + ctx.player.WIDTH * .5,
+                              min(right - ctx.player.WIDTH * .5, ctx.player.center_x))
+            duration = max(duration, abs(destination - ctx.player.center_x) / 300 + .25)
         self._set_state("pattern_telegraph", duration)
 
     def _launch_pattern(self, ctx, bounds):
@@ -3996,7 +4546,7 @@ class FinalEditorBoss(AdvancedEnemy):
             self.vx = self.facing * (520 + self.phase * 35)
             self._set_state("counter_cut", 3.0)
         elif self.pattern == "red_stamp":
-            self.vx = self.facing * 175
+            self.vx = (self.stamp_x - self.stamp_start_x) / (1000 / 1150)
             self.vy = -500
             self._set_state("red_stamp", 1.65)
         elif self.pattern == "proof_volley":
@@ -4005,6 +4555,9 @@ class FinalEditorBoss(AdvancedEnemy):
         elif self.pattern == "margin_burst":
             self.shot_timer = 0
             self._set_state("margin_burst", 1.35 + self.phase * .14)
+        elif self.pattern == "erase_columns":
+            self.shot_timer = 0
+            self._set_state("erase_columns", 1.38)
         else:
             self.redaction_checked = False
             self._set_state("redaction_wall", 1.12)
@@ -4012,6 +4565,7 @@ class FinalEditorBoss(AdvancedEnemy):
 
     def _finish_pattern(self, ctx):
         self.vx = 0
+        self.floor_edit_preview = None
         self.window_hits = 0
         self._clear_proof_shots(ctx)
         self._set_state("proof_window", 2.45)
@@ -4073,8 +4627,10 @@ class FinalEditorBoss(AdvancedEnemy):
             self.vx = self.facing * (520 + self.phase * 35)
             if self.state_time <= 0:
                 self._finish_pattern(ctx)
-        elif self.state == "red_stamp" and self.state_time <= 0:
-            self._finish_pattern(ctx)
+        elif self.state == "red_stamp":
+            self.vx = (self.stamp_x - self.stamp_start_x) / (1000 / 1150)
+            if self.state_time <= 0:
+                self._finish_pattern(ctx)
         elif self.state == "proof_volley":
             self.shot_timer -= dt
             if self.shot_timer <= 0:
@@ -4100,6 +4656,18 @@ class FinalEditorBoss(AdvancedEnemy):
                 ctx.sounds.play("staple")
             if self.state_time <= 0:
                 self._finish_pattern(ctx)
+        elif self.state == "erase_columns":
+            self.shot_timer -= dt
+            if self.shot_timer <= 0 and self.shot_index < len(self.erase_lanes):
+                lane = self.erase_lanes[self.shot_index]
+                self.shot_index += 1
+                self.shot_timer = .24
+                self.projectiles.append(PaperProjectile(
+                    lane, self.ground_y-250, 0, 540, "gutter_drop", .72, 10, 0,
+                    terrain_collision=False))
+                ctx.sounds.play("erase")
+            if self.state_time <= 0:
+                self._finish_pattern(ctx)
         elif self.state == "redaction_wall":
             if not self.redaction_checked and self.pose_progress >= .58:
                 self.redaction_checked = True
@@ -4120,22 +4688,29 @@ class FinalEditorBoss(AdvancedEnemy):
             ctx.sounds.play("paper_break")
             self._finish_pattern(ctx)
         elif self.state == "red_stamp" and landed:
-            self._erase_floor_temporarily(ctx, self.x, 118 + self.phase * 14, 1.8)
+            self.x = self.stamp_x
+            if self.floor_edit_preview is not None:
+                self._erase_floor_temporarily(ctx, self.stamp_x, 118 + self.phase * 14,
+                                             1.8, plan=self.floor_edit_preview)
             ctx.camera.kick(9, .3)
             ctx.sounds.play("erase")
             self._finish_pattern(ctx)
 
     def _attack_rect(self):
+        return self.attack_rect_for_state(self.state)
+
+    def attack_rect_for_state(self, state):
         rect = self.rect
-        if self.state == "counter_cut":
+        if state == "counter_cut":
             return rect.inflate(52, -25)
-        if self.state == "red_stamp":
+        if state == "red_stamp":
             return rect.inflate(75, 18)
         return rect
 
     def draw(self, surface, camera, renderer):
         if self.dead:
             return
+        self.draw_page_edits(surface, camera, renderer)
         x, y = camera.screen_x(self.x), round(self.y + camera.offset_y)
         color = self._base_color()
         red=(163,74,66)
@@ -4164,9 +4739,10 @@ class FinalEditorBoss(AdvancedEnemy):
         if self.state == "pattern_telegraph":
             cue = {"counter_cut": "CROSS OUT", "red_stamp": "STAMP BELOW",
                    "proof_volley": "PROOF SHOTS", "margin_burst": "MARGINS CLOSE",
-                   "redaction_wall": "FIND THE CLEAN MARGIN"}[self.pattern]
+                   "redaction_wall": "FIND THE CLEAN MARGIN",
+                   "erase_columns": "ERASER RAIN — LEAVE THE NUMBERED MARKS"}[self.pattern]
             self._draw_telegraph(surface, camera, renderer, cue)
-            if self.pattern in ("counter_cut", "red_stamp"):
+            if self.pattern == "counter_cut":
                 floor = round(self.ground_y + camera.offset_y)-5
                 end = x + self.facing*235
                 _dashed_line(surface, RED_RULE, (x, floor), (end, floor), 2, 9, 6)
@@ -4180,6 +4756,12 @@ class FinalEditorBoss(AdvancedEnemy):
                                      f"COPY: {self.mirror_weapon.replace('_', ' ').upper()}",
                                      (x - 77, y - 246), INK_LIGHT,
                                      renderer.font_small, 1)
+        if self.pattern == "red_stamp" and self.state in ("pattern_telegraph", "red_stamp"):
+            tx = camera.screen_x(self.stamp_x)
+            floor = round(self.ground_y + camera.offset_y)
+            half = (self.width + 75) // 2
+            pygame.draw.ellipse(surface, RED_RULE, (tx-half, floor-17, half*2, 23), 2)
+            _dashed_line(surface, RED_RULE, (tx, floor-185), (tx, floor-22), 1, 8, 8)
         if (self.pattern == "redaction_wall"
                 and self.state in ("pattern_telegraph", "redaction_wall")):
             left = max(0, min(surface.get_width(), camera.screen_x(self.safe_margin[0])))
@@ -4209,7 +4791,15 @@ class FinalEditorBoss(AdvancedEnemy):
                     lx=28 if side==1 else surface.get_width()-28
                     pygame.draw.lines(surface,(151,61,58),False,
                         [(lx-side*12,ly-10),(lx+side*5,ly),(lx-side*12,ly+10)],3)
-        elif self.state == "proof_window":
+        if self.pattern == "erase_columns" and self.state in ("pattern_telegraph", "erase_columns"):
+            floor = round(self.ground_y + camera.offset_y)
+            for index, lane in enumerate(self.erase_lanes):
+                lx = camera.screen_x(lane)
+                _dashed_line(surface, RED_RULE, (lx, floor-250), (lx, floor-7), 2, 9, 7)
+                pygame.draw.rect(surface, RED_RULE, (lx-13, floor-12, 26, 12), 2)
+                renderer.doodle_text(surface, str(index+1), (lx-5, floor-275),
+                                     RED_RULE, renderer.font_small, 0)
+        if self.state == "proof_window":
             renderer.doodle_text(surface, "YOUR TURN" if self.vulnerable else "GUARD UP",
                                  (x - 46, y - 226),
                                  INK_LIGHT, renderer.font_small, -2)
@@ -4229,6 +4819,7 @@ class FinalEditorBoss(AdvancedEnemy):
 
 class RedactionAgent(AdvancedEnemy):
     kind = 'redaction_agent'
+    warning_label = 'THREE SHOTS'
     width, height, radius = 44, 70, 23
     base_hp = 4
 
@@ -4278,7 +4869,7 @@ class RedactionAgent(AdvancedEnemy):
             pygame.draw.lines(surface,ink,False,[(x+side*8,y-18),(x+side*10,y-8),(x+side*(14+stride),y)],3)
         extend=26+round(self.pose_progress*12) if self.state=='agent_aim' else 38
         pygame.draw.line(surface,ink,(x,y-34),(x+self.facing*extend,y-36),5)
-        if self.state=='agent_aim':self._draw_telegraph(surface,camera,renderer,'THREE SHOTS')
+        if self.state=='agent_aim':self._draw_telegraph(surface,camera,renderer,self.warning_label)
         elif self.state=='reload':renderer.doodle_text(surface,'RELOAD',(x-26,y-95),(69,99,117),renderer.font_small)
         for shot in self.projectiles:shot.draw(surface,camera)
 
@@ -4291,6 +4882,7 @@ class RedactionDirector(AdvancedEnemy):
     is_boss = True
     contact_states = ("shear", "drop")
     block_hint = "EVADE THE ORDER — STRIKE THE EXPOSED CARBON CORE"
+    attack_repertoire = ("shear", "drop", "cross_cut", "carbon_fire", "binding_snap")
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -4299,6 +4891,7 @@ class RedactionDirector(AdvancedEnemy):
         self.window_hits = 0
         self.target_x = self.x
         self.cross_hit_done = False
+        self.binding_hit_done = False
         self._set_state("intro", 1.2)
 
     def _phase_for_hp(self):
@@ -4326,10 +4919,11 @@ class RedactionDirector(AdvancedEnemy):
         return True
 
     def _begin_pattern(self, ctx, bounds):
+        self.floor_edit_preview = None
         scripts = {
-            1: ("cut", "drop"),
-            2: ("carbon", "cross", "cut", "drop"),
-            3: ("carbon", "drop", "cross", "cut", "carbon"),
+            1: ("cut", "drop", "binding"),
+            2: ("carbon", "cross", "cut", "drop", "binding"),
+            3: ("carbon", "drop", "cross", "cut", "carbon", "binding"),
         }
         sequence = scripts[self.phase]
         self.pattern_index = (self.pattern_index + 1) % len(sequence)
@@ -4338,8 +4932,17 @@ class RedactionDirector(AdvancedEnemy):
         self.target_x = max(bounds[0] + 115,
                             min(bounds[1] - 115, ctx.player.center_x))
         self.cross_hit_done = False
+        self.binding_hit_done = False
+        if pattern == "drop" and self.phase >= 2:
+            self.floor_edit_preview = self._plan_floor_erase(
+                ctx, self.target_x, 104 + self.phase * 10, avoid_feet=False)
         duration = .9 if self.phase == 1 else .76
+        if pattern == "binding":
+            duration = 1.0
         self._set_state(f"{pattern}_warn", duration)
+
+    def _binding_rect(self):
+        return pygame.Rect(round(self.target_x-114), round(self.ground_y-72), 228, 72)
 
     def _cross_lines(self):
         top = self.ground_y - 205
@@ -4366,6 +4969,21 @@ class RedactionDirector(AdvancedEnemy):
             self.vx = 0
             self._set_state("cross_cut", .58)
             ctx.sounds.play("boss_signature")
+        elif self.state == "binding_warn" and self.state_time <= 0:
+            self.vx = 0
+            self._set_state("binding_snap", .6)
+            ctx.sounds.play("boss_signature")
+        elif self.state == "binding_snap":
+            if not self.binding_hit_done and self.pose_progress >= .5:
+                self.binding_hit_done = True
+                if (self.attack_suppressed <= 0 and
+                        self._binding_rect().colliderect(ctx.player.rect) and
+                        ctx.player.hurt(self.target_x)):
+                    ctx.sounds.play("ink")
+                    ctx.camera.kick(5, .17)
+                    _player_hit_feedback(ctx, self.target_x)
+            if self.state_time <= 0:
+                self._open(ctx)
         elif self.state == "carbon_warn" and self.state_time <= 0:
             # Fixed horizontal lanes are previewed for the entire warning.
             # The player can jump or dash-return these ordinary ink bullets.
@@ -4399,6 +5017,7 @@ class RedactionDirector(AdvancedEnemy):
 
     def _open(self, ctx):
         self.projectiles.clear()
+        self.floor_edit_preview = None
         self.vx = 0
         self.window_hits = 0
         self._set_state("open_hinge", 2.3)
@@ -4410,10 +5029,11 @@ class RedactionDirector(AdvancedEnemy):
         if self.state == "shear" and hit_wall:
             self._open(ctx)
         elif self.state == "drop" and landed:
-            if self.phase >= 2:
+            if self.phase >= 2 and self.floor_edit_preview is not None:
                 self._erase_floor_temporarily(
                     ctx, self.target_x, 104 + self.phase * 10,
                     1.65 + self.phase * .3,
+                    plan=self.floor_edit_preview,
                 )
             ctx.camera.kick(6, .22)
             ctx.sounds.play("paper_break")
@@ -4430,6 +5050,7 @@ class RedactionDirector(AdvancedEnemy):
     def draw(self, surface, camera, renderer):
         if self.dead:
             return
+        self.draw_page_edits(surface, camera, renderer)
         x, y = camera.screen_x(self.x), round(self.y + camera.offset_y)
         ink = self._base_color()
         f = self.facing
@@ -4454,7 +5075,8 @@ class RedactionDirector(AdvancedEnemy):
             stroke((x+side*14,y-33),(x+side*23,y-15),4)
             stroke((x+side*23,y-15),(x+side*34+step,y-2),4)
             stroke((x+side*34+step,y-2),(x+side*43+step,y-2),3)
-        # A long black redaction baton doubles as his firing-order pointer.
+        # His firing-order pointer has a readable pair of scissor blades.
+        # The low sweep keeps its original reach and warning stroke.
         hand=(hx+f*49,y-62)
         stroke((hx+f*23,y-84),hand,4)
         if self.state == "shear":
@@ -4462,6 +5084,13 @@ class RedactionDirector(AdvancedEnemy):
             stroke((x-f*44,y-27),(x+f*99,y-26),1,RED_RULE)
         else:
             stroke(hand,(hx+f*88,y-78),7)
+            stroke((hx+f*60,y-68),(hx+f*86,y-94),5)
+            stroke((hx+f*65,y-70),(hx+f*84,y-80),1,(225,219,195))
+            stroke((hx+f*65,y-72),(hx+f*83,y-91),1,(225,219,195))
+            for dx, dy in ((43, -60), (49, -72)):
+                rough_circle(surface, ink, (hx+f*dx, y+dy), 6,
+                             self.seed+62+dx, 2, 1, wobble=1)
+            pygame.draw.circle(surface, (164,59,58), (hx+f*60,y-68), 3)
             stroke((hx+f*61,y-68),(hx+f*77,y-85),2,RED_RULE)
         stroke((hx-f*24,y-80),(hx-f*49,y-49),4)
         file=pygame.Rect(hx-f*48-17,y-51,34,29)
@@ -4480,12 +5109,13 @@ class RedactionDirector(AdvancedEnemy):
             self._draw_telegraph(surface, camera, renderer, cue)
         if self.state == "drop_warn":
             target_x = camera.screen_x(self.target_x)
+            floor = round(self.ground_y + camera.offset_y)
             pygame.draw.line(surface, RED_RULE,
-                             (target_x - 30, y), (target_x + 30, y - 27), 3)
+                             (target_x - 30, floor), (target_x + 30, floor - 27), 3)
             pygame.draw.line(surface, RED_RULE,
-                             (target_x - 30, y - 27), (target_x + 30, y), 3)
-            _dashed_line(surface, RED_RULE, (target_x - 64, y - 3),
-                         (target_x + 64, y - 3), 2, 8, 7)
+                             (target_x - 30, floor - 27), (target_x + 30, floor), 3)
+            _dashed_line(surface, RED_RULE, (target_x - self.width // 2, floor - 3),
+                         (target_x + self.width // 2, floor - 3), 2, 8, 7)
         if self.state in ("cross_warn", "cross_cut"):
             for a, b in self._cross_lines():
                 screen_a = (camera.screen_x(a[0]), round(a[1] + camera.offset_y))
@@ -4495,14 +5125,28 @@ class RedactionDirector(AdvancedEnemy):
                 else:
                     pygame.draw.line(surface, (143, 45, 49), screen_a, screen_b, 7)
                     pygame.draw.line(surface, (224, 198, 164), screen_a, screen_b, 2)
+        if self.state in ("binding_warn", "binding_snap"):
+            rect = self._binding_rect()
+            rect.x = camera.screen_x(rect.x)
+            rect.y = round(rect.y + camera.offset_y)
+            pygame.draw.rect(surface, RED_RULE, rect, 2)
+            for edge, facing in ((rect.left, 1), (rect.right, -1)):
+                pygame.draw.lines(surface, RED_RULE, False,
+                                  [(edge+facing*18, rect.top), (edge, rect.top),
+                                   (edge, rect.bottom-2), (edge+facing*18, rect.bottom-2)], 4)
+            if self.state == "binding_warn":
+                self._draw_telegraph(surface, camera, renderer, "JUMP THE CLOSING BRACKET")
+            elif self.pose_progress >= .5:
+                for yy in range(rect.top+8, rect.bottom, 12):
+                    pygame.draw.line(surface, (143, 45, 49), (rect.left, yy), (rect.right, yy), 3)
         if self.state == "open_hinge":
             self._draw_opening(surface, (x, cy), 21)
             renderer.doodle_text(surface, "CORE EXPOSED" if self.vulnerable else "ORDER SEALED",
-                                 (x - 48, y - 132),
+                                 (x - 48, y - 170),
                                  (69, 99, 117), renderer.font_small, -2)
         renderer.doodle_text(surface, f"DIRECTOR / ORDER {self.phase}", (x - 82, y - 222),
                              RED_RULE, renderer.font_small, 1)
-        _health_scratches(surface, camera, self, 155)
+        _health_scratches(surface, camera, self, 189)
 
 
 # Legacy factory/save ID stays valid across the content revision.
@@ -4530,10 +5174,74 @@ class FoldDuelist(InkSamurai):
         else:
             super()._think(dt, ctx, bounds)
     def draw(self, surface, camera, renderer):
-        super().draw(surface, camera, renderer)
-        if self.dead: return
-        x,y = camera.screen_x(self.x), round(self.y+camera.offset_y)
-        pygame.draw.polygon(surface, (116,88,143), [(x-28,y-55),(x+28,y-55),(x,y-35)], 3)
+        if self.dead:
+            return
+        x, y = camera.screen_x(self.x), round(self.y+camera.offset_y)
+        color, f = self._base_color(), self.facing
+        # The duelist is a folded sheet, rather than another straw-hatted
+        # samurai. Its narrow hood, torn shoulder and crease stay legible 1:1.
+        hood = [(x-12,y-79),(x-2,y-92),(x+13,y-82),
+                (x+12,y-62),(x-10,y-63)]
+        pygame.draw.polygon(surface, (211,204,221), hood)
+        _scribbled_outline(surface, color, hood, self.seed+90, 2)
+        pygame.draw.polygon(surface, (157,143,174),
+                            [(x-2,y-89),(x+10,y-80),(x+9,y-65),(x+2,y-69)])
+        pygame.draw.line(surface, color, (x-7,y-74),(x+8,y-74),3)
+        pygame.draw.line(surface, PAPER, (x+f*2,y-75),(x+f*5,y-75),1)
+        coat = [(x-9,y-61),(x+11,y-61),(x+23,y-43),
+                (x+12,y-28),(x+3,y-32),(x-13,y-24),(x-23,y-45)]
+        pygame.draw.polygon(surface, (223,216,196), coat)
+        _scribbled_outline(surface, color, coat, self.seed+112, 2)
+        pygame.draw.polygon(surface, (116,88,143),
+                            [(x-9,y-59),(x+9,y-45),(x-12,y-27),(x-15,y-42)])
+        pygame.draw.line(surface, (116,88,143),(x-14,y-27),(x+13,y-29),4)
+        stride = round(math.sin(self.time*13)*min(8,abs(self.vx)*.02))
+        for side in (-1,1):
+            foot = x+side*16+side*stride
+            panel = [(x+side*3,y-27),(x+side*12,y-27),
+                     (foot+side*4,y-6),(foot-side*5,y-5),(x+side*5,y-14)]
+            pygame.draw.polygon(surface,(139,132,153),panel)
+            _scribbled_outline(surface,color,panel,self.seed+143+side,2)
+            pygame.draw.line(surface,color,(foot,y-5),(foot,y-1),3)
+            pygame.draw.line(surface,color,(foot-side*4,y),(foot+side*7,y),3)
+        # Keep the samurai's existing sword timing, tip and motion marks.
+        p = self.pose_progress
+        if self.state == "draw_cut":
+            swing = 1-(1-min(1,p*2.5))**3
+            sword_y = y-19-round(18*swing)
+            reach = 41+round(42*swing)
+            pygame.draw.arc(surface,(163,81,69),(x-91,y-100,182,119),
+                            -.2 if f>0 else 2.1,1.0 if f>0 else 3.3,3)
+        elif self.state == "sheath":
+            sword_y = y-19+round(math.sin(p*math.pi/2)*5)
+            reach = 41-round(p*13)
+        elif self.state == "recover":
+            ease = p*p*(3-2*p)
+            sword_y = y-37+round(ease*18)
+            reach = 83-round(ease*42)
+        else:
+            sword_y,reach = y-19,41
+        grip = (x+f*7,sword_y)
+        elbow = (x+f*21,y-38)
+        pygame.draw.lines(surface,color,False,[(x+f*19,y-44),elbow,grip],4)
+        pygame.draw.circle(surface,(225,212,178),grip,4)
+        pygame.draw.circle(surface,color,grip,4,1)
+        tip = (x+f*reach,sword_y-(17 if self.state=="draw_cut" else 4))
+        if self.state in {"draw_cut","recover"}:
+            blade = [(grip[0]+f*6,grip[1]-2),tip,
+                     (tip[0]-f*7,tip[1]+4),(grip[0]+f*6,grip[1]+3)]
+            pygame.draw.polygon(surface,(224,230,217),blade)
+            pygame.draw.lines(surface,color,True,blade,2)
+            pygame.draw.line(surface,PAPER,(grip[0]+f*9,grip[1]-1),tip,1)
+        else:
+            pygame.draw.line(surface,(79,70,69),grip,tip,5)
+            pygame.draw.line(surface,(166,114,76),grip,tip,2)
+        pygame.draw.line(surface,(177,67,64),(grip[0]+f*6,grip[1]-6),
+                         (grip[0]+f*6,grip[1]+6),3)
+        if self.state == "sheath":
+            self._draw_telegraph(surface,camera,renderer,"DRAW")
+        for projectile in self.projectiles:
+            projectile.draw(surface,camera)
         if self.state == 'echo_telegraph':
             self._draw_telegraph(surface,camera,renderer,'SECOND CUT')
             pygame.draw.line(surface,(164,76,76),(x,y-18),(x+self.facing*135,y-18),3)
@@ -4561,10 +5269,44 @@ class MarginSniper(RedactionAgent):
         elif self.state=='reload' and self.state_time<=0:
             self._set_state('idle',.5)
     def draw(self,surface,camera,renderer):
-        super().draw(surface,camera,renderer)
         if self.dead:return
         x,y=camera.screen_x(self.x),round(self.y+camera.offset_y)
-        pygame.draw.line(surface,(129,66,71),(x,y-40),(x+self.facing*58,y-40),5)
+        ink,f=self._base_color(),self.facing
+        # A forward hood, leaned coat and braced knee distinguish the
+        # single-shot sniper from the upright, red-tied burst-fire agent.
+        coat=[(x-f*13,y-49),(x+f*9,y-51),(x+f*20,y-17),
+              (x+f*3,y-20),(x-f*21,y-10),(x-f*17,y-35)]
+        pygame.draw.polygon(surface,(120,132,135),coat)
+        _scribbled_outline(surface,ink,coat,self.seed+231,2)
+        hood=[(x-f*12,y-69),(x+f*8,y-72),(x+f*16,y-59),
+              (x+f*10,y-49),(x-f*12,y-51)]
+        pygame.draw.polygon(surface,(174,183,180),hood)
+        _scribbled_outline(surface,ink,hood,self.seed+247,2)
+        pygame.draw.line(surface,ink,(x-f*2,y-60),(x+f*12,y-60),3)
+        stride=round(math.sin(self.time*12)*min(8,abs(self.vx)*.025))
+        pygame.draw.lines(surface,ink,False,
+                          [(x+f*5,y-20),(x+f*17,y-9),(x+f*(22+stride),y)],3)
+        pygame.draw.lines(surface,ink,False,
+                          [(x-f*6,y-20),(x-f*11,y-9),(x-f*(17+stride),y)],3)
+        # The muzzle remains at the original sightline's x+f*58, y-40.
+        stock=[(x-f*12,y-44),(x+f*12,y-43),(x+f*10,y-34),(x-f*9,y-34)]
+        pygame.draw.polygon(surface,(129,66,71),stock)
+        _scribbled_outline(surface,ink,stock,self.seed+278,2)
+        pygame.draw.line(surface,ink,(x+f*12,y-40),(x+f*58,y-40),5)
+        pygame.draw.line(surface,(169,176,168),(x+f*27,y-41),(x+f*53,y-41),1)
+        pygame.draw.line(surface,ink,(x+f*13,y-46),(x+f*25,y-46),5)
+        pygame.draw.line(surface,ink,(x+f*19,y-45),(x+f*19,y-40),2)
+        for shoulder,elbow,hand in (
+                ((x-f*11,y-47),(x-f*4,y-34),(x+f*12,y-38)),
+                ((x+f*9,y-48),(x+f*19,y-30),(x+f*33,y-37))):
+            pygame.draw.lines(surface,ink,False,[shoulder,elbow,hand],3)
+            pygame.draw.circle(surface,(219,210,185),hand,3)
+            pygame.draw.circle(surface,ink,hand,3,1)
+        if self.state=='agent_aim':
+            self._draw_telegraph(surface,camera,renderer,self.warning_label)
+        elif self.state=='reload':
+            renderer.doodle_text(surface,'RELOAD',(x-26,y-95),(69,99,117),renderer.font_small)
+        for shot in self.projectiles:shot.draw(surface,camera)
         if self.state=='agent_aim' and self.aim_target:
             target=(camera.screen_x(self.aim_target[0]),round(self.aim_target[1]+camera.offset_y))
             pygame.draw.line(surface,(181,71,70),(x,y-40),target,2)
@@ -4793,18 +5535,37 @@ class CarbonStamper(EraserBrute):
         head = (x, y - 72)
         rough_circle(surface, ink, head, 12, self.seed + 13, 2, 2, wobble=2)
         pygame.draw.line(surface, ink, (x - 11, y - 75), (x + 11, y - 75), 5)
-        coat = [(x - 20, y - 60), (x + 20, y - 60),
-                (x + 29, y - 22), (x - 29, y - 22)]
+        f = self.facing
+        # Square rolled sleeves and a short apron replace the agent-like
+        # flared coat. The stamp's original vertical poses remain intact.
+        coat = [(x-22,y-60),(x+22,y-60),(x+24,y-39),
+                (x+18,y-22),(x-18,y-22),(x-24,y-39)]
         pygame.draw.polygon(surface, (169, 174, 169), coat)
         _scribbled_outline(surface, ink, coat, self.seed + 117, 3)
+        apron=[(x-12,y-57),(x+12,y-57),(x+16,y-20),(x-16,y-20)]
+        pygame.draw.polygon(surface,(225,215,184),apron)
+        _scribbled_outline(surface,ink,apron,self.seed+124,2)
+        pygame.draw.rect(surface,ink,(x-7,y-40,14,10),1)
+        for side in (-1,1):
+            sleeve=[(x+side*18,y-54),(x+side*30,y-48),
+                    (x+side*26,y-38),(x+side*17,y-41)]
+            pygame.draw.polygon(surface,(225,215,184),sleeve)
+            _scribbled_outline(surface,ink,sleeve,self.seed+138+side,2)
         for side in (-1, 1):
             pygame.draw.line(surface, ink, (x + side * 13, y - 22),
                              (x + side * 20, y), 4)
         stamp_y = y - (108 if self.state == "slam_telegraph" else
                        21 if self.state == "slam" else 57)
-        pygame.draw.line(surface, ink, (x + 14, y - 53), (x + 38, stamp_y - 16), 5)
-        pygame.draw.rect(surface, (141, 65, 64), (x + 19, stamp_y - 12, 40, 17))
-        pygame.draw.rect(surface, ink, (x + 19, stamp_y - 12, 40, 17), 2)
+        sx = x+f*39
+        pygame.draw.line(surface,ink,(x+f*24,y-43),(sx,stamp_y-23),5)
+        pygame.draw.line(surface,ink,(x-f*19,y-45),(sx-f*12,stamp_y-10),4)
+        pygame.draw.rect(surface,(168,136,90),(sx-5,stamp_y-24,10,13))
+        pygame.draw.rect(surface,ink,(sx-5,stamp_y-24,10,13),2)
+        pygame.draw.ellipse(surface,(168,136,90),(sx-9,stamp_y-30,18,9))
+        pygame.draw.ellipse(surface,ink,(sx-9,stamp_y-30,18,9),2)
+        pygame.draw.rect(surface,(141,65,64),(sx-20,stamp_y-12,40,17))
+        pygame.draw.rect(surface,ink,(sx-20,stamp_y-12,40,17),2)
+        pygame.draw.line(surface,ink,(sx-18,stamp_y+3),(sx+18,stamp_y+3),3)
         if self.state == "slam_telegraph":
             self._draw_telegraph(surface, camera, renderer, "STAMP")
             floor = round(self.ground_y + camera.offset_y)

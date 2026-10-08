@@ -41,8 +41,12 @@ class SketchRewardTests(unittest.TestCase):
                 if isinstance(item, LostSketch):
                     shipped[item.secret_id] = page
         self.assertEqual(shipped, {s.secret_id: s.page for s in SKETCHES})
-        self.assertEqual(len({s.technique for s in SKETCHES}), 12)
-        self.assertEqual(len({s.attribute for s in SKETCHES}), 12)
+        self.assertEqual(len({s.technique for s in SKETCHES}), len(SKETCHES))
+        self.assertEqual(len({s.attribute for s in SKETCHES[:12]}), 12)
+        self.assertEqual({s.secret_id for s in SKETCHES[:12]}, {
+            "old_first_figure", "practice_monster", "shrine_roof", "beyond_red",
+            "coffee_secret", "margin_battle_note", "water_tower", "bad_draft",
+            "eraser_survivor_sketch", "orbit_observatory", "agent_badge", "last_homework"})
 
     def test_old_collection_restores_rewards_without_stacking_or_changing_health(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -56,9 +60,9 @@ class SketchRewardTests(unittest.TestCase):
             health_limit = player.max_health
             for _ in range(10):
                 apply_sketch_rewards(player, restored.data["secrets"])
-            self.assertEqual(player.sketch_coyote_bonus, .06)
-            self.assertEqual(player.sketch_air_control, 1.20)
-            self.assertEqual(player.sketch_dash_recovery, .10)
+            self.assertEqual(player.sketch_coyote_bonus, .08)
+            self.assertEqual(player.sketch_air_control, 1.30)
+            self.assertEqual(player.sketch_dash_recovery, .14)
             self.assertEqual(player.health, 1)
             self.assertEqual(player.max_health, health_limit)
             apply_sketch_rewards(player, ["unknown_old_catalogue_id"])
@@ -88,7 +92,7 @@ class SketchRewardTests(unittest.TestCase):
         sketch.update(.016, ctx, True)
         self.assertEqual(collected, ["water_tower"])
         self.assertEqual(sounds, ["pencil"])
-        self.assertIn("Sidearm shots pass through one enemy", level.toast)
+        self.assertIn("One extra target per sidearm bullet", level.toast)
         self.assertGreater(sketch.acquired_time, 0)
 
     def test_distinct_drawing_silhouettes_and_page_aware_activation(self):
@@ -98,7 +102,7 @@ class SketchRewardTests(unittest.TestCase):
             surface.fill((240, 235, 215))
             draw_sketch_icon(surface, sketch.icon, (50,50), 64)
             signatures.add(hashlib.sha256(pygame.image.tobytes(surface,"RGB")).hexdigest())
-        self.assertEqual(len(signatures), 12)
+        self.assertEqual(len(signatures), len(SKETCHES))
         self.assertTrue(sketch_active(SKETCH_BY_ID["shrine_roof"], ()))
         self.assertFalse(sketch_active(SKETCH_BY_ID["water_tower"], ("pencil_blade",)))
         self.assertTrue(sketch_active(SKETCH_BY_ID["water_tower"], ("ink_pistol",)))
@@ -185,7 +189,7 @@ class SketchRewardTests(unittest.TestCase):
         normal = fire(2,"rubber_band").projectiles[0]
         rebound = fire(2,"rubber_band",("bad_draft",)).projectiles[0]
         orbit = fire(2,"rubber_band",("orbit_observatory",)).projectiles[0]
-        self.assertEqual(rebound.bounces,normal.bounces+1)
+        self.assertEqual(rebound.bounces,normal.bounces+2)
         self.assertGreater(orbit.life,normal.life)
         self.assertEqual(orbit.damage,normal.damage)
         normal = fire(3,"ink_pistol").projectiles[0]

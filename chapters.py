@@ -59,11 +59,20 @@ def build_chapter(index: int, discovered=None) -> ChapterRuntime:
     if index >= 3:
         from campaign import build_new_page
         chapter = build_new_page(index)
+        from page_flow import compose_quality_flow
+        compose_quality_flow(chapter)
         for entity in chapter.entities.items:
             if isinstance(entity, LostSketch):
                 entity.discovered = entity.secret_id in set(discovered or [])
         from major_update import polish_route
         polish_route(chapter)
+        from encounter_revision import prepare_encounters, finish_encounters
+        prepare_encounters(chapter)
+        from major_campaign import compose_extended_campaign
+        compose_extended_campaign(chapter, discovered)
+        finish_encounters(chapter)
+        from encounter_variety import compose_encounter_variety
+        compose_encounter_variety(chapter)
         return chapter
     builders = [_prologue, _margins, _mistakes, _under_ink, _finale]
     chapter = builders[index]()
@@ -94,12 +103,21 @@ def build_chapter(index: int, discovered=None) -> ChapterRuntime:
         # before the drawn airlock will open.
         from route_puzzles import SatelliteRelayPuzzle
         chapter.entities.add(SatelliteRelayPuzzle(chapter.world, 9100, index))
+    from page_flow import compose_quality_flow
+    compose_quality_flow(chapter)
     discovered = set(discovered or [])
     for entity in chapter.entities.items:
         if isinstance(entity, LostSketch) and entity.secret_id in discovered:
             entity.discovered = True
     from major_update import polish_route
     polish_route(chapter)
+    from encounter_revision import prepare_encounters, finish_encounters
+    prepare_encounters(chapter)
+    from major_campaign import compose_extended_campaign
+    compose_extended_campaign(chapter, discovered)
+    finish_encounters(chapter)
+    from encounter_variety import compose_encounter_variety
+    compose_encounter_variety(chapter)
     return chapter
 
 
@@ -131,10 +149,10 @@ def _prologue():
 
     def intro_update(ctx, progress):
         ctx.player.draw_amount = progress
-        ctx.director.tool = ArtistTool("pencil", ctx.player.center_x + 8,
-                                       ctx.player.y + 8 + progress * 42, True, -.65)
+        tip_x,tip_y=ctx.player.redraw_tip()
+        ctx.director.tool = ArtistTool("pencil", tip_x,tip_y,True,-.65)
         if int(progress * 50) % 4 == 0:
-            ctx.particles.pencil_speck(ctx.player.center_x, ctx.player.y + progress * 48)
+            ctx.particles.pencil_speck(tip_x,tip_y)
 
     def intro_finish(ctx):
         ctx.player.draw_amount = 1
@@ -150,21 +168,41 @@ def _prologue():
 
     def controls(ctx, progress):
         ctx.director.tool = ArtistTool("pencil", 540 + progress * 90, 410, True)
-        ctx.director.write(505, 405, "A    D", progress)
+        ctx.director.write(505, 475, "A / D   ->", progress)
 
     director.add(EventSequence("movement_note", lambda ctx: ctx.player.x > 340, [
-        EventStep(1.0, update=controls),
+        EventStep(.25, update=controls),
     ]))
-    director.add(draw_platform_event("first_step_drawn", 390, stair1, .65, False))
-    director.add(draw_platform_event("second_step_drawn", 650, stair2, .65, False))
-    director.add(draw_platform_event("third_step_drawn", 910, stair3, .65, False))
-
     def jump_note(ctx, progress):
-        ctx.director.write(1650, 470, "SPACE", progress)
-        ctx.director.tool = ArtistTool("pencil", 1650 + 80 * progress, 485, True)
+        ctx.director.write(685, 440, "SPACE  ^", progress)
+        ctx.director.tool = ArtistTool("pencil", 685 + 80 * progress, 455, True)
 
-    director.add(EventSequence("jump_note", lambda ctx: ctx.player.x > 1530, [EventStep(.8, update=jump_note)]))
-    director.add(draw_platform_event("first_bridge_drawn", 2080, bridge, 2.2, True, "this way"))
+    director.add(EventSequence("jump_note", lambda ctx: ctx.player.x > 430, [EventStep(.25, update=jump_note)]))
+    # The new line is still finishing as the figure approaches the edge. Its
+    # complete collider arrives before a normal walk reaches the gap.
+    director.add(draw_platform_event("first_step_drawn", 535, stair1, .45, False))
+    director.add(draw_platform_event("second_step_drawn", 760, stair2, .40, False))
+
+    from action_content import WeaponPickup
+    gift=WeaponPickup(1200,500,"folded_shuriken",page_index=0,authored_by_director=True)
+    entities.add(gift)
+
+    def draw_fold(ctx,progress):
+        gift.drawing=True
+        gift.draw_progress=progress
+        ctx.director.tool=ArtistTool("pencil",gift.x-31+62*progress,gift.y-32,True,-.58,1.1)
+        ctx.particles.pencil_speck(gift.x-31+62*progress,gift.y-32)
+        ctx.director.write(gift.x-115,375,"a fold that finds its way back",progress)
+
+    director.add(EventSequence("first_tool_drawn",
+        lambda ctx:ctx.player.x>=1100 and not gift.collected,[
+            EventStep(.16,lock_player=True),
+            EventStep(.65,update=draw_fold,start=lambda ctx:ctx.sounds.play("pencil"),
+                      finish=lambda ctx:setattr(gift,"draw_progress",1),lock_player=True),
+            EventStep(.10,lock_player=True),
+        ]))
+    director.add(draw_platform_event("third_step_drawn", 985, stair3, .25, False))
+    director.add(draw_platform_event("first_bridge_drawn", 2080, bridge, 1.0, True, "this way"))
 
     return ChapterRuntime(0, *CHAPTER_TITLES[0], world, (220, 520), 5280,
                           [Checkpoint("start", 220, 520, trigger_x=0),

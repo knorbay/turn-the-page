@@ -6,6 +6,7 @@ import random
 import pygame
 
 from paper_renderer import jitter_line
+from boss_effectiveness import boss_damage
 from sketch_marks import pivot, rough_circle, wax_disc
 from settings import INK, INK_LIGHT, PAPER, WIDTH
 
@@ -47,6 +48,8 @@ ATTACK_WARNINGS = frozenset({
     "sweep_telegraph", "bounty_draw", "rail_whistle", "staple_columns_warn",
     "moon_release_warn", "meteor_warn", "return_whistle", "return_telegraph",
     "cross_warn", "cut_warn", "page_slap_warn",
+    "needle_thrust_warn", "staple_cross_warn", "comet_corridor_warn",
+    "binding_warn", "carbon_warn",
 })
 ATTACK_COMMITMENTS = frozenset({
     "lunge", "thrust", "charge", "dive", "slam", "stomp", "sweep", "snap",
@@ -56,6 +59,8 @@ ATTACK_COMMITMENTS = frozenset({
     "drop", "echo_slash", "bounty_volley", "rail_rush", "staple_columns",
     "moon_release", "meteor_fall", "return_sweep", "cross_cut",
     "redaction_wall", "ink_rain", "page_slap",
+    "needle_thrust", "staple_crossfire", "comet_corridor", "binding_snap",
+    "erase_columns", "carbon_fire",
 })
 
 
@@ -160,7 +165,8 @@ class DoodleEnemy:
         return pygame.Rect(round(self.x - w / 2), round(self.y - h), w, h)
 
     def update(self, dt, ctx, bounds):
-        if self.dead:
+        if (self.dead or getattr(self, "artist_erasing", False)
+                or getattr(self, "notebook_activation_blocked", False)):
             return
         self.time += dt
         self.state_time -= dt
@@ -222,7 +228,8 @@ class DoodleEnemy:
 
     def hit_from_weapon(self, amount, knockback, source_x, tags=None, ctx=None):
         """Duck-typed damage API shared by melee and the modular weapon system."""
-        if self.dead:
+        if (self.dead or getattr(self, "artist_erasing", False)
+                or getattr(self, "notebook_activation_blocked", False)):
             return False
         tags = set(tags or ())
         if self.kind == "boss" and self.state != "recover" and "eraser" not in tags:
@@ -241,6 +248,8 @@ class DoodleEnemy:
         damage = max(0.0, float(amount))
         if damage <= 0:
             return False
+        if self.kind == "boss":
+            damage = boss_damage(damage, self, tags)
         self.hp -= damage
         self.hit_flash = .15
         direction = 1 if self.x >= source_x else -1
@@ -365,7 +374,7 @@ class DoodleEnemy:
         x = camera.screen_x(self.x)
         y = round(self.y + camera.offset_y)
         color = (148, 45, 48) if self.hit_flash > 0 else INK
-        if self.state == "telegraph":
+        if self.state == "telegraph" and not getattr(self, "artist_erasing", False):
             pygame.draw.circle(surface, (154, 75, 67), (x, y - self.radius), self.radius + 8, 2)
             cue = {"crawler": "->", "hopper": "^", "spitter": "o", "boss": "!!"}.get(self.kind, "!")
             renderer.doodle_text(surface, cue, (x - 8, y - self.radius * 2 - 26),
@@ -476,8 +485,9 @@ class DoodleEnemy:
                 shield = pygame.Rect(x - 92, y - 158, 184, 164)
                 pygame.draw.arc(surface, INK_LIGHT, shield, .15, 2.45, 2)
                 pygame.draw.arc(surface, INK_LIGHT, shield, 3.15, 5.75, 2)
-        for blob in self.projectiles:
-            blob.draw(surface, camera)
+        if not getattr(self, "artist_erasing", False):
+            for blob in self.projectiles:
+                blob.draw(surface, camera)
 
 
 class CombatArena:
@@ -532,6 +542,10 @@ class CombatArena:
                     any(not getattr(stage, "entry_ready", True)
                         for stage in getattr(self, "artist_stages", ()))):
                 return
+            artist = getattr(getattr(ctx, "game", None), "artist_director", None)
+            prepare = getattr(artist, "prepare_encounter", None)
+            if callable(prepare):
+                prepare(self, ctx)
             self._restore_fight_ink(ctx)
             self.encounter_active = True
             self.encounter_time = 0
@@ -539,10 +553,7 @@ class CombatArena:
             self.wave = 0
             if self.wave_ids:
                 self._spawn_wave(ctx, self.wave_ids[0])
-            if self.arena_id == "first_crossout":
-                ctx.level.toast = "F / J ATTACK    SHIFT / K DASH"
-                ctx.level.toast_time = 4.0
-            elif self.boss:
+            if self.boss:
                 ctx.level.toast = "the gate shuts — a named drawing waits below"
                 ctx.level.toast_time = 2.6
             else:
@@ -571,9 +582,27 @@ class CombatArena:
         enemy_bounds = (self.start_x - 45, self.end_x - 35)
         self._coordinate_pressure(ctx, dt)
         for enemy in self.enemies:
+            if getattr(enemy, "artist_erasing", False):
+                if not getattr(enemy, "artist_erase_prepared", False):
+                    getattr(enemy, "projectiles", []).clear()
+                    restore = getattr(enemy, "_restore_temporary_erases", None)
+                    if callable(restore):
+                        restore(force=True)
+                    enemy.artist_erase_prepared = True
+                continue
+            if getattr(enemy, "notebook_spawn_pending", False):
+                if not self._place_drawn_enemy(enemy, ctx):
+                    continue
+                enemy.notebook_spawn_pending = False
             if getattr(enemy, "notebook_reveal", 1) < 1:
                 enemy.notebook_reveal = min(1, enemy.notebook_reveal+dt/.7)
+                if enemy.notebook_reveal >= 1:
+                    enemy.notebook_activation_blocked = self._drawing_occupied(enemy, ctx)
                 continue
+            if getattr(enemy, "notebook_activation_blocked", False):
+                if self._drawing_occupied(enemy, ctx):
+                    continue
+                enemy.notebook_activation_blocked = False
             if getattr(enemy, "artist_still", 0) > 0:
                 enemy.artist_still = max(0, enemy.artist_still-dt)
                 continue
@@ -605,8 +634,12 @@ class CombatArena:
             ctx.camera.kick(5, .22)
             combat_audio = getattr(ctx.sounds, "set_combat", None)
             if callable(combat_audio):
-                combat_audio(False, self.boss)
+                combat_audio(False, self.boss, self.boss_kind)
             if getattr(ctx, "game", None) is not None:
+                finish = getattr(getattr(ctx.game, "artist_director", None),
+                                 "complete_encounter", None)
+                if callable(finish):
+                    finish(self, ctx)
                 ctx.game.behavior.record("arena_clear", arena=self.arena_id,
                                          seconds=self.encounter_time,
                                          page=ctx.level.chapter_index)
@@ -668,9 +701,11 @@ class CombatArena:
                         kind, x, ground_y, seed=seed,
                         boss=self.boss or normalized_kind == "boss",
                     )
+                enemy.drawn_spawn_x = x
+                enemy.notebook_spawn_pending = not self._place_drawn_enemy(enemy, ctx)
                 enemy.notebook_reveal = 0.0
                 self.enemies.append(enemy)
-                if getattr(enemy, "is_boss", False):
+                if getattr(enemy, "is_boss", False) or normalized_kind == "baby_face_giant":
                     self.boss_kind = getattr(enemy, "kind", normalized_kind)
                     spawned_boss = True
                 enemy.encounter_role = {
@@ -701,7 +736,7 @@ class CombatArena:
         if spawned_boss and not self.boss_cue_started:
             combat_audio = getattr(ctx.sounds, "set_combat", None)
             if callable(combat_audio):
-                combat_audio(True, True)
+                combat_audio(True, True, self.boss_kind)
             self.boss_cue_started = True
             self.boss_intro_time = 2.8
             self._restore_fight_ink(ctx)
@@ -710,30 +745,58 @@ class CombatArena:
             ctx.level.toast_time = 2.35
             ctx.camera.kick(6, .22)
 
-    def _frame_active_fight(self, ctx):
-        """Follow the duel inside wide arenas instead of exposing blind corners."""
-        live = [enemy for enemy in self.enemies if not getattr(enemy, "dead", False)]
-        if not live:
-            ctx.camera.script_target = (self.start_x + self.end_x) * .5
-            return
-        player_x = ctx.player.center_x
-        bosses = [enemy for enemy in live if getattr(enemy, "is_boss", False)]
-        target = (bosses[0] if bosses else
-                  min(live, key=lambda enemy: abs(enemy.x - player_x)))
-        focus = (player_x + float(target.x)) * .5
-        # Keep both gate strokes readable when the room fits. In larger rooms,
-        # allow travel but retain a generous screen margin around combatants.
-        margin = min(WIDTH * .37, max(150.0, (self.end_x - self.start_x) * .5))
-        low = self.start_x + margin
-        high = self.end_x - margin
+    def _place_drawn_enemy(self, enemy, ctx):
+        """Put a completed footprint inside the drawn border, clear of actors.
+
+        Candidate positions come from the requested centre and exact free
+        edges. A crowded page waits for a free footprint before starting its
+        stroke; no invisible active enemy is born inside an existing body.
+        """
+        rect = enemy.rect
+        left_offset, right_offset = rect.left-enemy.x, rect.right-enemy.x
+        low = self.entrance_gate.x2+8-left_offset
+        high = self.exit_gate.x1-8-right_offset
         if low > high:
-            focus = (self.start_x + self.end_x) * .5
-        else:
-            focus = max(low, min(high, focus))
-        ctx.camera.script_target = focus
+            return False
+        desired = max(low, min(high, getattr(enemy, "drawn_spawn_x", enemy.x)))
+        blockers = [ctx.player.rect.inflate(20, 0)]
+        blockers.extend(self.world.collision_rects())
+        blockers.extend(other.rect.inflate(12, 0) for other in self.enemies
+                        if other is not enemy and not getattr(other, "dead", False)
+                        and not getattr(other, "notebook_spawn_pending", False))
+        candidates = {desired, low, high}
+        for obstacle in blockers:
+            candidates.update((max(low, min(high, obstacle.left-8-right_offset)),
+                               max(low, min(high, obstacle.right+8-left_offset))))
+        original_x = enemy.x
+        for candidate in sorted(candidates, key=lambda value: (abs(value-desired), value)):
+            enemy.x = float(candidate)
+            if not any(enemy.rect.colliderect(obstacle) for obstacle in blockers):
+                return True
+        enemy.x = original_x
+        return False
+
+    def _drawing_occupied(self, enemy, ctx):
+        rect = enemy.rect
+        return (rect.colliderect(ctx.player.rect)
+                or any(rect.colliderect(other.rect) for other in self.enemies
+                       if other is not enemy and not getattr(other, "dead", False)
+                       and not getattr(other, "notebook_spawn_pending", False))
+                or any(rect.colliderect(solid) for solid in self.world.collision_rects()))
+
+    def _frame_active_fight(self, ctx):
+        """A live duel uses the same player-follow view as the rest of the page."""
+        if not getattr(ctx.player, "locked", False):
+            ctx.camera.script_target = None
+        # The baby-face sword reveal is explicitly locked and owns its framing.
+        # Enemy movement and wave breaks must not overwrite that scene.
 
     @staticmethod
     def _attack_committed(enemy):
+        if (getattr(enemy, "artist_erasing", False)
+                or getattr(enemy, "notebook_spawn_pending", False)
+                or getattr(enemy, "notebook_activation_blocked", False)):
+            return False
         state = getattr(enemy, "state", "")
         return (state in ATTACK_WARNINGS or state in ATTACK_COMMITMENTS
                 or state in getattr(enemy, "contact_states", ()))
@@ -777,6 +840,9 @@ class CombatArena:
         # occupied in recovery while its projectiles or erased floor are near.
         return [self._pressure_role(enemy) for enemy in self.enemies
                 if not getattr(enemy, "dead", False)
+                and not getattr(enemy, "artist_erasing", False)
+                and not getattr(enemy, "notebook_spawn_pending", False)
+                and not getattr(enemy, "notebook_activation_blocked", False)
                 and (self._attack_committed(enemy) or self._nearby_hazard(enemy))]
 
     def _role_can_enter(self, enemy, load):
@@ -789,6 +855,10 @@ class CombatArena:
             active in {"ranged", "area"} for active in load))
 
     def _admit_attack(self, enemy, next_state):
+        if (getattr(enemy, "artist_erasing", False)
+                or getattr(enemy, "notebook_spawn_pending", False)
+                or getattr(enemy, "notebook_activation_blocked", False)):
+            return False
         # Boss scripts and transitions within an already announced attack are
         # autonomous. Only the first warning asks for admission. MoonBot's
         # charge is its visible ranged windup despite the shared state name.
@@ -821,7 +891,10 @@ class CombatArena:
         self._pressure_time += dt
         if ctx is not None:
             self._pressure_player = ctx.player
-        live_ids = {id(enemy) for enemy in self.enemies if not getattr(enemy, "dead", False)}
+        live_ids = {id(enemy) for enemy in self.enemies if not getattr(enemy, "dead", False)
+                    and not getattr(enemy, "artist_erasing", False)
+                    and not getattr(enemy, "notebook_spawn_pending", False)
+                    and not getattr(enemy, "notebook_activation_blocked", False)}
         self._pressure_queue = [enemy for enemy in self._pressure_queue
                                 if id(enemy) in live_ids
                                 and not self._attack_committed(enemy)
@@ -851,6 +924,9 @@ class CombatArena:
             "sweep_telegraph", "bounty_draw", "rail_whistle", "staple_columns_warn",
             "moon_release_warn", "meteor_warn", "return_whistle", "return_telegraph", "cross_warn", "bounty_volley", "rail_rush",
             "staple_columns", "moon_release", "meteor_fall",
+            "needle_thrust_warn", "needle_thrust", "staple_cross_warn", "staple_crossfire",
+            "comet_corridor_warn", "comet_corridor", "binding_warn", "binding_snap",
+            "erase_columns", "carbon_warn", "carbon_fire",
         }
         danger = sum(getattr(enemy, "state", "") in danger_states for enemy in live)
         health_ratio = ctx.player.health / max(1, ctx.player.max_health)
@@ -861,39 +937,47 @@ class CombatArena:
         setter(min(1.0, pressure), self.boss)
 
     def draw(self, surface, camera, renderer):
-        if self.encounter_active:
+        if self.encounter_active and not getattr(self, "cinematic_active", False):
             left = camera.screen_x(self.start_x)
             right = camera.screen_x(self.end_x)
             label = getattr(self, "display_name", self.arena_id.replace('_', ' '))
             renderer.doodle_text(surface, label, (left + 30, 305),
                                  INK_LIGHT, renderer.font_small, -1)
-            renderer.doodle_text(surface, f"wave {self.wave + 1}/{max(1, len(self.wave_ids))}",
-                                 (right - 115, 305), INK_LIGHT, renderer.font_small, 1)
+            # A dedicated duel is named once, without a wave counter.
+            if not self.boss and self.arena_id != "baby_face_interlude":
+                counter = ("CLEAR THE ROOM" if len(self.wave_ids) == 1 else
+                           f"wave {self.wave + 1}/{len(self.wave_ids)}")
+                renderer.doodle_text(surface, counter,
+                    (right - 180, 305), INK_LIGHT, renderer.font_small, 1)
             jitter_line(surface, (111, 66, 65), (left + 20, 340), (right - 25, 340),
                         1, int(self.start_x), 1, .8)
             if self.boss_intro_time > 0:
-                alpha = min(1.0, self.boss_intro_time / .35,
-                            (2.8 - self.boss_intro_time) / .3)
-                card = pygame.Surface((760, 116), pygame.SRCALPHA)
-                card.fill((246, 241, 222, round(226 * max(0.0, alpha))))
-                pygame.draw.rect(card, (111, 66, 65, round(245 * max(0.0, alpha))),
-                                 card.get_rect(), 3)
+                from boss_presentation import draw_boss_entrance
                 label = getattr(self, "display_name", self.arena_id.replace('_', ' '))
-                renderer.doodle_text(card, label, (34, 22), INK,
-                                     renderer.font, -1)
-                renderer.doodle_text(card, self.boss_rule, (36, 72),
-                                     (126, 58, 58), renderer.font_small, 0)
-                surface.blit(card, ((WIDTH - card.get_width()) // 2, 76))
+                subject = next((enemy for enemy in self.enemies
+                    if getattr(enemy, "is_boss", False) and not getattr(enemy, "dead", False)
+                    and not getattr(enemy, "notebook_spawn_pending", False)), None)
+                draw_boss_entrance(surface, renderer, self.boss_kind, label,
+                                  self.boss_rule, 2.8-self.boss_intro_time, boss=subject)
         from staging import draw_enemy_read
         for enemy in self.enemies:
+            if getattr(enemy, 'notebook_spawn_pending', False):
+                continue
             from notebook_art import redraw_doodle
             old_clip = surface.get_clip()
             reveal = getattr(enemy, 'notebook_reveal', 1)
-            if reveal < 1:
+            erasing = getattr(enemy, 'artist_erasing', False)
+            if erasing:
+                progress = max(0, min(1, getattr(enemy, 'artist_erase_progress', 0)))
+                top = round(enemy.rect.top+camera.offset_y-90)
+                height = round((enemy.rect.height+180)*(1-progress))
+                surface.set_clip(old_clip.clip(pygame.Rect(camera.screen_x(enemy.x)-180,top,360,height)))
+            elif reveal < 1:
                 top = round(enemy.rect.top+camera.offset_y-90)
                 surface.set_clip(old_clip.clip(pygame.Rect(camera.screen_x(enemy.x)-180,top,360,
                                         round((enemy.rect.height+180)*reveal))))
             if not redraw_doodle(enemy, surface, camera, renderer):
                 enemy.draw(surface, camera, renderer)
             surface.set_clip(old_clip)
-            if reveal >= 1: draw_enemy_read(surface, camera, renderer, enemy)
+            if reveal >= 1 and not erasing and not getattr(enemy, 'notebook_activation_blocked', False):
+                draw_enemy_read(surface, camera, renderer, enemy)

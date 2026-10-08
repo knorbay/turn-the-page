@@ -64,9 +64,15 @@ class BetaPolishTests(unittest.TestCase):
             g=Game(self.screen,Path(d)/"save.json")
             g.weapons.configure_page(1)
             g.weapons.active_loadout=None
-            g.weapons.unlock("ink_pistol")
+            g.weapons.lend_drawn_tool("ink_pistol")
+            g.weapons.unlock("margin_maul")
             with patch.object(g.renderer,"doodle_text") as draw:
                 g.weapons.draw_hud(g.screen,g.renderer,controller=True)
                 labels=[c.args[1] for c in draw.call_args_list]
             self.assertIn("LB / D-PAD",labels)
             self.assertNotIn("Q / wheel",labels)
+            g.weapons.tool_hint_time=0
+            with patch.object(g.renderer,"doodle_text") as draw:
+                g.weapons.draw_hud(g.screen,g.renderer,controller=True)
+                labels=[c.args[1] for c in draw.call_args_list]
+            self.assertNotIn("LB / D-PAD",labels)

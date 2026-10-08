@@ -105,7 +105,7 @@ class DisplayAndSettingsContracts(unittest.TestCase):
                     game.viewport.y + canvas_y * game.viewport.height / HEIGHT,
                 )
 
-            game._mouse_click(window_point(640, 225))
+            game._mouse_click(window_point(640, game._settings_row_rect(0).centery))
             self.assertEqual(game.dragging_volume_index, 0)
             self.assertEqual(game.save.data["settings"]["master_volume"], 0.0)
             game._set_volume_from_canvas(745, write=False)
@@ -130,6 +130,7 @@ class DisplayAndSettingsContracts(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             game = Game(self.display, Path(directory) / "save.json")
             game.state = "playing"
+            game.weapons.lend_drawn_tool("folded_shuriken")
             game.last_input_device = "mouse"
             game.screen.fill((255, 255, 255))
             before = pygame.image.tostring(game.screen, "RGB")

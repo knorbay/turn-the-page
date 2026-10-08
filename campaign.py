@@ -4,7 +4,8 @@ import pygame
 from chapters import ChapterRuntime, Checkpoint
 from combat import CombatArena
 from action_content import (WeaponPickup, ArenaPaperBeat, register_artist_stage,
-                            claim_artist_stage, release_artist_stage, cleared_wave)
+                            claim_artist_stage, release_artist_stage, cleared_wave,
+                            claim_artist_canvas,release_artist_canvas)
 from page_arsenal import label_for
 from entities import LostSketch
 from scripted_events import ArtistTool, EventSequence, EventStep
@@ -17,7 +18,7 @@ NEW_ROOMS={
   ('redacted_rooftops',5000,6200,('folder_glider','redaction_agent'),('ink_clone','eraser_brute','split_lantern')),
   ('office_ambush',7000,8240,('redaction_agent','crumpled_one','ink_clone'),('folder_glider','doodle_turret','redaction_agent')),
   ('evidence_vault',9000,10260,('redaction_agent','doodle_turret'),('ink_clone','carbon_stamper')),
-  ('scissor_office',12100,13620,('redaction_agent','ink_clone'),('scissor_director',)),
+  ('scissor_office',11940,13810,('redaction_agent','ink_clone'),('scissor_director',)),
  ),
  4: (
   ('last_lesson',900,2040,('ink_samurai','redaction_agent'),('lantern_yokai','gutter_lantern','ruler_guard')),
@@ -25,7 +26,7 @@ NEW_ROOMS={
   ('margin_revolt',4800,6040,('rake_cactus','ink_outlaw','ticket_vulture'),('redaction_agent','file_runner','ruler_guard')),
   ('the_last_crossout',6900,8140,('ink_clone','redaction_agent','moon_bot'),('margin_sniper','ember_hound','fold_duelist')),
   ('unfinished_corridor',9000,10260,('fold_duelist','redaction_agent'),('satellite_sentry','ink_clone')),
-  ('final_margin_revision',12100,13620,('final_editor',)),
+  ('final_margin_revision',11870,13810,('final_editor',)),
  )
 }
 ROOM_BRIEFS={
@@ -57,15 +58,22 @@ class ArtistCombatHand:
         return True
     @property
     def wave_ready(self):
-        return self.completed or self.arena.wave+1>=len(self.arena.wave_ids)
+        return ((self.completed and getattr(self.platform,"collider_active",True))
+                or self.arena.wave+1>=len(self.arena.wave_ids))
     def update(self,dt,ctx,interact=False):
         if self.arena.completed:
             self.completed=True
             self.platform.draw_progress=1
             release_artist_stage(self.arena,self)
+            release_artist_canvas(ctx,self)
+            return
+        if ctx.player.health<=0:
+            release_artist_stage(self.arena,self)
+            release_artist_canvas(ctx,self)
             return
         if self.completed or not cleared_wave(self.arena) or self.wave_ready:return
         if not claim_artist_stage(self.arena,self):return
+        if not claim_artist_canvas(ctx,self,allow_in_combat=True):return
         if self.phase=='waiting':
             self.phase='warn';self.timer=0
             ctx.level.toast='THE ARTIST: New landing. Try the upper angle.'
@@ -85,6 +93,7 @@ class ArtistCombatHand:
                 self.completed=True
                 self.helped=True
                 release_artist_stage(self.arena,self)
+                release_artist_canvas(ctx,self)
                 ctx.sounds.play('paper_step')
                 if ctx.game:
                     ctx.game.behavior.record('artist_help',kind='real_landing',page=ctx.level.chapter_index)
@@ -102,9 +111,16 @@ class FinalPageEdit:
         self.arena=arena;self.world=world;self.applied=False;self.completed=False
         self.timer=0;self.scenario=None;self.platforms=[]
     def update(self,dt,ctx,interact=False):
-        if not self.arena.encounter_active:return
+        if self.arena.completed or ctx.player.health<=0:
+            release_artist_canvas(ctx,self)
+            if self.arena.completed:
+                for p in self.platforms:p.draw_progress=1
+                self.completed=True
+            return
+        if self.completed or not self.arena.encounter_active:return
         boss=next((e for e in self.arena.enemies if e.kind=='final_editor'),None)
         if boss is None or boss.scenario is None:return
+        if not claim_artist_canvas(ctx,self,allow_in_combat=True):return
         if not self.applied:
             self.applied=True;self.scenario=boss.scenario
             # Different geometry accompanies the four attack scripts.
@@ -126,7 +142,9 @@ class FinalPageEdit:
                 p.draw_progress=min(1,max(0,(self.timer-.45-i*.3)/.7))
                 if 0<p.draw_progress<1:
                     ctx.particles.pencil_speck(p.visible_x2,p.y)
-        else:self.completed=True
+        else:
+            self.completed=True
+            release_artist_canvas(ctx,self)
     def draw(self,surface,camera,renderer):
         if not self.applied or self.completed:return
         # The final encounter keeps its authored live geometry edit. A local
@@ -155,7 +173,7 @@ def build_new_page(index):
     for i in range(math.ceil((end+220)/950)):
         p=world.add(i*950-30,(i+1)*950+10,590,16,f'campaign_floor_{i}',7000+index*100+i)
         p.appearance='carbon' if index==3 else 'handwriting'
-    gift_specs=((650,'ink_pistol'),(4550,'marker_shotgun')) if index==3 else ((460,'rubber_band'),(2350,'eraser_cannon'),(6350,'marker_shotgun'))
+    gift_specs=((650,'ink_pistol'),(4550,'marker_shotgun')) if index==3 else ((460,'margin_maul'),(2350,'eraser_cannon'),(6350,'marker_shotgun'))
     for x,weapon in gift_specs:
         runtime.entities.add(WeaponPickup(x,590,weapon,label=label_for(index,weapon),page_index=index))
     for room_index,row in enumerate(NEW_ROOMS[index]):

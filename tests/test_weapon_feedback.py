@@ -29,6 +29,7 @@ class WeaponFeedbackContracts(unittest.TestCase):
         player = Player(100, 542)
         system = WeaponSystem(player)
         system.configure_page(page)
+        system.lend_drawn_tool("pencil_blade")
         world = PaperWorld(page=page+1, build_legacy=False)
         return system, SimpleNamespace(
             player=player, world=world, particles=ParticleSystem(),

@@ -19,10 +19,23 @@ from settings import HEIGHT, INK, INK_LIGHT, RED_RULE, VERSION, WIDTH
 from weapons import WEAPON_ORDER, WeaponSystem
 from sketches import SKETCHES, apply_sketch_rewards, draw_sketch_card, wrap_text
 from health_hud import draw_health
+from localization import (translate, set_language, LocalizedFont,
+                          SUPPORTED_LANGUAGES, LANGUAGE_NAMES, normalize_language)
 
 
 WINDOW_PRESETS = ((1120, 700), (1280, 800), (1440, 900), (1680, 1050), (1920, 1200))
 MIN_WINDOW_SIZE = (800, 500)
+MUSIC_CREDITS_RECT = pygame.Rect(857, 646, 224, 34)
+LANGUAGE_RECT = pygame.Rect(792, 32, 289, 36)
+
+
+def fitted_label(font, text, color, max_width):
+    """Keep translated labels inside their allotted row without dropping words."""
+    image = font.render(text, True, color)
+    if image.get_width() > max_width:
+        height = max(1, round(image.get_height() * max_width / image.get_width()))
+        image = pygame.transform.smoothscale(image, (max_width, height))
+    return image
 
 
 class Game:
@@ -32,6 +45,7 @@ class Game:
         self.display = screen
         self.screen = pygame.Surface((WIDTH, HEIGHT)).convert()
         settings = self.save.data["settings"]
+        set_language(settings["language"])
         self.windowed_size = self._bounded_window_size(
             (settings["window_width"], settings["window_height"])
         )
@@ -40,6 +54,8 @@ class Game:
         self._configure_initial_display()
         self.renderer = PaperRenderer()
         self.behavior = BehaviorLedger(self.save.data.get("behavior"))
+        from adaptive_artist import AdaptiveArtist
+        self.artist_director = AdaptiveArtist(self.save.data.get("artist_adaptation"))
         self.artist_companion = ArtistCompanion()
         self.achievements = AchievementTracker(self.save)
         self.achievement_banner = None
@@ -47,6 +63,8 @@ class Game:
         self.sounds = NotebookSounds()
         self.sounds.apply_settings(settings)
         self.camera = Camera(WIDTH)
+        from boss_cinematic import BossCinematic
+        self.boss_cinematic = BossCinematic(self)
         self.particles = ParticleSystem()
         self.player = Player()
         self.level = Level(self.save, 0, "start")
@@ -88,6 +106,8 @@ class Game:
         if new_game:
             self.save.new_game()
         self.behavior = BehaviorLedger(self.save.data.get("behavior"))
+        from adaptive_artist import AdaptiveArtist
+        self.artist_director = AdaptiveArtist(self.save.data.get("artist_adaptation"))
         self.artist_companion = ArtistCompanion()
         self.achievements = AchievementTracker(self.save)
         self.achievement_banner = None
@@ -116,6 +136,8 @@ class Game:
 
     def continue_game(self):
         self.behavior = BehaviorLedger(self.save.data.get("behavior"))
+        from adaptive_artist import AdaptiveArtist
+        self.artist_director = AdaptiveArtist(self.save.data.get("artist_adaptation"))
         self.artist_companion = ArtistCompanion()
         self.achievements = AchievementTracker(self.save)
         self.achievement_banner = None
@@ -135,6 +157,11 @@ class Game:
         self.hit_stop = 0.0
         self.damage_flash = 0.0
         self._buffered_actions = InputFrame()
+        self.transition_active = False
+        self.transition_snapshot = None
+        self.transition_sound_stage = 0
+        self.transition_weapon_erased = False
+        self.ending_time = 0.0
         self.state = "playing"
         self.sounds.set_combat(False)
         self.sounds.start_ambience(index)
@@ -142,12 +169,14 @@ class Game:
     def _restore_weapons(self):
         self.weapons.configure_page(self.level.chapter_index)
         self.weapons.restore({
-            "unlocked": self.save.data.get("weapons", ["pencil_blade"]),
-            "current_id": self.save.data.get("current_weapon", "pencil_blade"),
+            "unlocked": self.save.data.get("weapons", []),
+            "current_id": self.save.data.get("current_weapon", "unarmed"),
             "ammo": self.save.data.get("weapon_ammo", {}),
         })
 
     def _attach_runtime(self):
+        if hasattr(self, "boss_cinematic"):
+            self.boss_cinematic.cancel()
         self.level.weapons = self.weapons
         self.level.game = self
         self._apply_page_identity()
@@ -158,20 +187,41 @@ class Game:
         """Each world owns its temporary tools and player silhouette."""
         self.weapons.configure_page(self.level.chapter_index)
         apply_sketch_rewards(self.player, self.save.data.get("secrets", []))
-        page_loadouts = {
-            0: ("pencil_blade", "folded_shuriken"),
-            1: ("pencil_blade", "ink_pistol", "marker_shotgun", "chalk_bomb"),
-            2: ("pencil_blade", "rubber_band", "eraser_cannon", "excalibur", "chalk_bomb"),
-            3: ("pencil_blade", "ink_pistol", "marker_shotgun", "carbon_lance", "folded_shuriken"),
-            4: ("pencil_blade", "rubber_band", "eraser_cannon", "marker_shotgun", "folded_shuriken"),
-        }
-        allowed = (*page_loadouts.get(self.level.chapter_index, tuple(WEAPON_ORDER)), "margin_maul")
-        constrain = getattr(self.weapons, "constrain_page_inventory", None)
-        if callable(constrain):
-            constrain(allowed, reset=self.level.current_checkpoint == "start")
-        setter = getattr(self.weapons, "set_page_loadout", None)
-        if callable(setter):
-            setter(allowed)
+        from page_arsenal import loadout_for, PAGE_ENTRY_TOOLS
+        allowed = set(loadout_for(self.level.chapter_index))
+        page_key = str(self.level.chapter_index)
+        request = self.save.data.get("notebook_choices", {}).get(page_key)
+        has_requested_tool = request in ("tool", "tool2")
+        if has_requested_tool:
+            from notebook_agency import NotebookAgency
+            from weapons import WEAPON_ORDER
+            requested = self.save.data.get("notebook_tools", {}).get(page_key, "margin_maul")
+            if requested not in WEAPON_ORDER:
+                requested = NotebookAgency.TOOL_OFFERS[self.level.chapter_index][request == "tool2"]
+            allowed.add(requested)
+        gifts = self.artist_director.gifts_for(self.level.chapter_index)
+        allowed.update(gifts)
+        self.weapons.constrain_page_inventory(
+            allowed, reset=self.level.current_checkpoint == "start" and not (has_requested_tool or gifts))
+        self.weapons.set_page_loadout(allowed)
+        if (self.level.current_checkpoint not in ("start", "alive") and
+                self.weapons.current_id == "unarmed"):
+            # Older checkpoints can predate the page-owned loadout. Reuse
+            # its entry drawing beside the redraw, rather than silently
+            # granting a sword or leaving a restored fight unwinnable.
+            from action_content import WeaponPickup
+            tool = PAGE_ENTRY_TOOLS[self.level.chapter_index]
+            pickup = next((entity for entity in self.level.entities.items
+                           if isinstance(entity, WeaponPickup)
+                           and entity.weapon_id == tool), None)
+            if pickup is not None:
+                pickup.x = self.player.center_x + 72
+                pickup.y = self.player.rect.bottom
+                pickup.collected = pickup.completed = False
+                pickup.authored_by_director = False
+                pickup.drawing = False
+                pickup.draw_progress = 0
+                pickup.draw_sound_played = False
         page_style = {
             0: "ronin",
             1: "cowboy",
@@ -184,6 +234,7 @@ class Game:
         self.player.page_style = page_style
 
     def persist_behavior(self, write=False):
+        self.save.data["artist_adaptation"] = self.artist_director.snapshot()
         self.save.update_behavior(self.behavior.snapshot(), write=write)
 
     def run(self):
@@ -318,7 +369,7 @@ class Game:
             elif event.type == pygame.KEYDOWN:
                 self.last_input_device = "keyboard"
                 self._key_down(event.key)
-            elif event.type == pygame.KEYUP and event.key == pygame.K_SPACE:
+            elif event.type == pygame.KEYUP and event.key in (pygame.K_SPACE, pygame.K_w, pygame.K_UP):
                 self.pending_input.jump_released = True
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 self.last_input_device = "mouse"
@@ -390,6 +441,8 @@ class Game:
             if button == 0:
                 options = self._title_options()
                 self._activate_title(options[self.menu_index % len(options)])
+            elif button == 3:
+                self.previous_state, self.state = "title", "credits"
         elif self.state == "pause":
             if button == 0:
                 options = self._pause_options()
@@ -398,24 +451,49 @@ class Game:
                 self.state = "playing"
         elif self.state == "settings":
             if button == 0:
-                if self.settings_index in (3, 4):
+                if self.settings_index in (3, 4, 5):
                     self._change_setting(1)
-                elif self.settings_index == 5:
-                    self.state = self.previous_state
+                elif self.settings_index == 6:
+                    self._return_to_previous()
             elif button == 1:
-                self.state = self.previous_state
-        elif self.state == "back_pages" and button in (0, 1):
-            self.state = "pause"
+                self._return_to_previous()
+        elif self.state == "back_pages":
+            if button in (0, 1):
+                self._return_to_previous()
+            elif button in (4, 5):
+                self.sketch_page = (getattr(self,"sketch_page",0)+(-1 if button==4 else 1)) % ((len(SKETCHES)+8)//9)
+        elif self.state == "credits":
+            if button in (0, 1):
+                self._return_to_previous()
+            elif button in (4, 5):
+                self._turn_music_credits(-1 if button == 4 else 1)
+        elif self.state == "controls" and button in (0, 1):
+            self._return_to_previous()
         elif self.state == "achievements":
             if button in (0, 1):
-                self.state = self.previous_state
+                self._return_to_previous()
             elif button in (4, 5):
                 self._turn_achievement_page(-1 if button == 4 else 1)
-        elif self.state == "ending" and button == 0:
-            self.state = "title"
+        elif self.state == "replay_pages":
+            if button == 0:
+                self._activate_replay_page()
+            elif button == 1:
+                self._return_to_title()
+        elif self.state == "ending":
+            if not hasattr(self, "afterword"):
+                if button == 0:
+                    self._return_to_title()
+            elif button == 1:
+                self._return_to_title()
+            elif self.afterword.complete and button == 0:
+                self._activate_afterword_action()
+            elif button == 0:
+                self.pending_input.jump_pressed = True
+            elif button == 3:
+                self.pending_input.interact = True
 
     def _controller_button_up(self, button):
-        if button == 0 and self.state == "playing":
+        if button == 0 and self.state in ("playing", "ending"):
             self.pending_input.jump_released = True
 
     def _controller_hat(self, value):
@@ -433,11 +511,17 @@ class Game:
                 self.pause_index = (self.pause_index + 1) % len(self._pause_options())
         elif self.state == "settings":
             if vertical > 0:
-                self.settings_index = (self.settings_index - 1) % 6
+                self.settings_index = (self.settings_index - 1) % 7
             elif vertical < 0:
-                self.settings_index = (self.settings_index + 1) % 6
+                self.settings_index = (self.settings_index + 1) % 7
             if horizontal:
                 self._change_setting(1 if horizontal > 0 else -1)
+        elif self.state == "replay_pages":
+            self.replay_page_index = (self.replay_page_index + horizontal - 2*vertical) % 6
+        elif self.state == "ending" and hasattr(self, "afterword") and self.afterword.complete:
+            self.afterword.menu_index = (self.afterword.menu_index + horizontal - vertical) % 3
+        elif self.state == "credits" and horizontal:
+            self._turn_music_credits(1 if horizontal > 0 else -1)
         elif self.state == "playing" and horizontal:
             self.pending_input.weapon_cycle = 1 if horizontal > 0 else -1
 
@@ -476,10 +560,12 @@ class Game:
                 self.menu_index = (self.menu_index + 1) % len(options)
             elif key in (pygame.K_RETURN, pygame.K_SPACE):
                 self._activate_title(options[self.menu_index])
+            elif key == pygame.K_c:
+                self.previous_state, self.state = "title", "credits"
             elif key == pygame.K_ESCAPE:
                 self.running = False
         elif self.state == "playing":
-            if key == pygame.K_SPACE:
+            if key in (pygame.K_SPACE, pygame.K_w, pygame.K_UP):
                 self.pending_input.jump_pressed = True
             elif key == pygame.K_e:
                 self.pending_input.interact = True
@@ -516,49 +602,167 @@ class Game:
             elif key == pygame.K_q:
                 self._activate_pause("TITLE")
         elif self.state == "back_pages":
-            if key in (pygame.K_ESCAPE, pygame.K_b, pygame.K_RETURN):
-                self.state = "pause"
+            if key in (pygame.K_LEFT, pygame.K_RIGHT):
+                self.sketch_page = (getattr(self, "sketch_page", 0) + (-1 if key == pygame.K_LEFT else 1)) % ((len(SKETCHES)+8)//9)
+            elif key == pygame.K_a:
+                self.collection_parent = self.previous_state
+                self.previous_state = "back_pages"
+                self.state = "achievements"
+            elif key == pygame.K_c:
+                self.collection_parent = self.previous_state
+                self.previous_state = "back_pages"
+                self.state = "controls"
+            elif key in (pygame.K_ESCAPE, pygame.K_b, pygame.K_RETURN):
+                self._return_to_previous()
+        elif self.state == "credits":
+            if key in (pygame.K_LEFT, pygame.K_RIGHT):
+                self._turn_music_credits(-1 if key == pygame.K_LEFT else 1)
+            elif key in (pygame.K_ESCAPE, pygame.K_RETURN):
+                self._return_to_previous()
+        elif self.state == "controls":
+            if key in (pygame.K_ESCAPE, pygame.K_RETURN):
+                self._return_to_previous()
         elif self.state == "achievements":
             if key in (pygame.K_LEFT, pygame.K_RIGHT):
                 self._turn_achievement_page(-1 if key == pygame.K_LEFT else 1)
             if key in (pygame.K_ESCAPE, pygame.K_a, pygame.K_RETURN):
-                self.state = self.previous_state
+                self._return_to_previous()
         elif self.state == "settings":
             if key in (pygame.K_UP, pygame.K_w):
-                self.settings_index = (self.settings_index - 1) % 6
+                self.settings_index = (self.settings_index - 1) % 7
             elif key in (pygame.K_DOWN, pygame.K_s):
-                self.settings_index = (self.settings_index + 1) % 6
+                self.settings_index = (self.settings_index + 1) % 7
             elif key in (pygame.K_LEFT, pygame.K_a):
                 self._change_setting(-1)
             elif key in (pygame.K_RIGHT, pygame.K_d):
                 self._change_setting(1)
-            elif key == pygame.K_RETURN and self.settings_index in (3, 4):
+            elif key == pygame.K_RETURN and self.settings_index in (3, 4, 5):
                 self._change_setting(1)
-            elif key in (pygame.K_RETURN, pygame.K_ESCAPE) and self.settings_index == 5:
-                self.state = self.previous_state
+            elif key in (pygame.K_RETURN, pygame.K_ESCAPE) and self.settings_index == 6:
+                self._return_to_previous()
             elif key == pygame.K_ESCAPE:
-                self.state = self.previous_state
-        elif self.state == "ending" and key in (pygame.K_RETURN, pygame.K_ESCAPE):
-            self.state = "title"
+                self._return_to_previous()
+        elif self.state == "replay_pages":
+            if key in (pygame.K_LEFT, pygame.K_a, pygame.K_RIGHT, pygame.K_d):
+                self.replay_page_index = (self.replay_page_index + (-1 if key in (pygame.K_LEFT, pygame.K_a) else 1)) % 6
+            elif key in (pygame.K_UP, pygame.K_w, pygame.K_DOWN, pygame.K_s):
+                self.replay_page_index = (self.replay_page_index + (-2 if key in (pygame.K_UP, pygame.K_w) else 2)) % 6
+            elif key in (pygame.K_RETURN, pygame.K_SPACE):
+                self._activate_replay_page()
+            elif key == pygame.K_ESCAPE:
+                self._return_to_title()
+        elif self.state == "ending":
+            if not hasattr(self, "afterword"):
+                if key in (pygame.K_RETURN, pygame.K_ESCAPE):
+                    self._return_to_title()
+            elif key == pygame.K_ESCAPE:
+                self._return_to_title()
+            elif self.afterword.complete:
+                if key in (pygame.K_LEFT, pygame.K_UP, pygame.K_a):
+                    self.afterword.menu_index = (self.afterword.menu_index-1) % 3
+                elif key in (pygame.K_RIGHT, pygame.K_DOWN, pygame.K_d):
+                    self.afterword.menu_index = (self.afterword.menu_index+1) % 3
+                elif key in (pygame.K_RETURN, pygame.K_SPACE, pygame.K_e):
+                    self._activate_afterword_action()
+            elif key in (pygame.K_SPACE, pygame.K_w, pygame.K_UP):
+                self.pending_input.jump_pressed = True
+            elif key in (pygame.K_e, pygame.K_RETURN):
+                self.pending_input.interact = True
+
+    def _return_to_title(self):
+        if hasattr(self, "boss_cinematic"):
+            self.boss_cinematic.cancel()
+        self.sounds.set_combat(False)
+        self.sounds.start_ambience(0)
+        self.sounds.quiet_ambience(False)
+        self.state = "title"
+
+    def _return_to_previous(self):
+        target = self.previous_state
+        if target == "back_pages":
+            self.previous_state = getattr(self, "collection_parent", "pause")
+        self.state = target
 
     def _title_options(self):
-        options = ["NEW GAME"]
-        if self.save.can_continue:
-            options.append("CONTINUE")
-        options.extend(["ACHIEVEMENTS", "SETTINGS", "QUIT"])
-        return options
+        resume = "REPLAY PAGES" if self.save.data.get("completed") else "CONTINUE"
+        options = [resume, "NEW GAME"] if self.save.can_continue else ["NEW GAME"]
+        return options + ["TRAINING", "BACK PAGES", "SETTINGS", "QUIT"]
+
+    def _open_replay_pages(self):
+        self.sounds.set_combat(False)
+        self.sounds.start_ambience(0)
+        self.sounds.quiet_ambience(False)
+        self.replay_page_index = 0
+        self.state = "replay_pages"
+
+    def _activate_replay_page(self):
+        page = self.replay_page_index
+        if page == 5:
+            from afterword import Afterword
+            self.afterword = Afterword(self.save.data.get("secrets", ()))
+            self.ending_time = 3.3
+            self.ending_tools_erased = True
+            self.transition_snapshot = self.screen.copy()
+            self.state = "ending"
+            self.sounds.set_combat(False)
+            self.sounds.quiet_ambience(True)
+            return
+        seconds = float(self.save.data.get("play_seconds", 0))
+        self.reset(False)
+        self.level.load_chapter(page, "start", self.player, self.camera)
+        self._restore_weapons()
+        self._attach_runtime()
+        self.session_seconds = self.page_started_at = seconds
+        self.sounds.start_ambience(page)
+        self.save.checkpoint(page, "start", seconds)
+        self.pending_input = InputFrame()
+
+    def _activate_afterword_action(self):
+        option = self.afterword.actions[self.afterword.menu_index]
+        if option == "REPLAY PAGES":
+            self._open_replay_pages()
+        elif option == "BACK PAGES":
+            self.previous_state, self.state = "ending", "back_pages"
+        else:
+            self._return_to_title()
+
+    def start_training(self):
+        from save_system import TrainingSave
+        self.campaign_save = self.save
+        self.save = TrainingSave(self.campaign_save)
+        self.reset(False)
+        self.training_only = True
+        self.title_notice = ""
+
+    def finish_training(self, completed=False):
+        if not getattr(self, "training_only", False):
+            return
+        self.campaign_save.data["settings"].update(self.save.data["settings"])
+        self.save = self.campaign_save
+        self.training_only = False
+        self.achievements = AchievementTracker(self.save)
+        self._return_to_title()
+        self.menu_index = 0
+        self.title_notice = "TRAINING COMPLETE / your campaign progress is kept" if completed else ""
 
     def _activate_title(self, option):
         if option == "NEW GAME":
             self.reset(True)
         elif option == "CONTINUE":
             self.continue_game()
+        elif option == "REPLAY PAGES":
+            self._open_replay_pages()
+        elif option == "TRAINING":
+            self.start_training()
         elif option == "SETTINGS":
             self.previous_state = "title"
             self.state = "settings"
         elif option == "ACHIEVEMENTS":
             self.previous_state = "title"
             self.state = "achievements"
+        elif option == "BACK PAGES":
+            self.previous_state = "title"
+            self.state = "back_pages"
         elif option == "QUIT":
             self.running = False
 
@@ -567,11 +771,31 @@ class Game:
         if pos is None:
             return
         if self.state == "title":
+            if MUSIC_CREDITS_RECT.collidepoint(pos):
+                self.previous_state, self.state = "title", "credits"
+                return
+            if LANGUAGE_RECT.collidepoint(pos):
+                self.settings_index = 5
+                self._change_setting(1)
+                return
             options = self._title_options()
             for i, option in enumerate(options):
                 if self._menu_rect(i, len(options)).collidepoint(pos):
                     self.menu_index = i
                     self._activate_title(option)
+                    return
+        elif self.state == "replay_pages":
+            from page_replay import replay_rects
+            for i, rect in enumerate(replay_rects()):
+                if rect.collidepoint(pos):
+                    self.replay_page_index = i
+                    self._activate_replay_page()
+                    return
+        elif self.state == "ending" and hasattr(self, "afterword") and self.afterword.complete:
+            for i, rect in enumerate(self.afterword.action_rects()):
+                if rect.collidepoint(pos):
+                    self.afterword.menu_index = i
+                    self._activate_afterword_action()
                     return
         elif self.state == "pause":
             options = self._pause_options()
@@ -581,35 +805,65 @@ class Game:
                     self._activate_pause(option)
                     return
         elif self.state == "settings":
-            for i in range(6):
+            for i in range(7):
                 if not self._settings_row_rect(i).collidepoint(pos):
                     continue
                 self.settings_index = i
                 if i < 3 and pos[0] >= 615:
                     self.dragging_volume_index = i
                     self._set_volume_from_canvas(pos[0], write=False)
-                elif i in (3, 4):
+                elif i in (3, 4, 5):
                     self._change_setting(1)
-                elif i == 5:
-                    self.state = self.previous_state
+                elif i == 6:
+                    self._return_to_previous()
                 return
-        elif self.state == "back_pages" and self._back_pages_close_rect().collidepoint(pos):
-            self.state = "pause"
+        elif self.state == "back_pages":
+            if self._back_pages_close_rect().collidepoint(pos):
+                self._return_to_previous()
+            elif pygame.Rect(705,65,170,38).collidepoint(pos):
+                self.collection_parent = self.previous_state
+                self.previous_state = "back_pages"
+                self.state = "achievements"
+            elif pygame.Rect(885,65,160,38).collidepoint(pos):
+                self.collection_parent = self.previous_state
+                self.previous_state = "back_pages"
+                self.state = "controls"
+            elif pygame.Rect(880,595,140,32).collidepoint(pos):
+                self.sketch_page = (getattr(self,"sketch_page",0)+1) % ((len(SKETCHES)+8)//9)
+        elif self.state == "credits":
+            from soundtrack_credits import (CREDITS_BACK_RECT, CREDITS_PREVIOUS_RECT,
+                                           CREDITS_NEXT_RECT)
+            if CREDITS_BACK_RECT.collidepoint(pos):
+                self._return_to_previous()
+            elif CREDITS_PREVIOUS_RECT.collidepoint(pos):
+                self._turn_music_credits(-1)
+            elif CREDITS_NEXT_RECT.collidepoint(pos):
+                self._turn_music_credits(1)
+        elif self.state == "controls":
+            if self._back_pages_close_rect().collidepoint(pos):
+                self._return_to_previous()
         elif self.state == "achievements":
             if self._achievements_close_rect().collidepoint(pos):
-                self.state = self.previous_state
+                self._return_to_previous()
             elif pygame.Rect(300,580,140,34).collidepoint(pos):
                 self._turn_achievement_page(-1)
             elif pygame.Rect(680,580,140,34).collidepoint(pos):
                 self._turn_achievement_page(1)
 
+    def _turn_music_credits(self, step):
+        from soundtrack_credits import music_credit_page_count
+        from scene_music import MUSIC_CREDITS
+        self.music_credit_page = (getattr(self, "music_credit_page", 0)+step) % music_credit_page_count(MUSIC_CREDITS)
+
     @staticmethod
     def _pause_options():
-        return ("CONTINUE", "ACHIEVEMENTS", "SETTINGS", "BACK PAGES", "RESTART PAGE", "TITLE")
+        return ("CONTINUE", "BACK PAGES", "SETTINGS", "CONTROLS", "RESTART PAGE", "TITLE")
 
     @staticmethod
     def _pause_rect(index):
-        return pygame.Rect(WIDTH // 2 - 180, 245 + index * 52, 360, 42)
+        if index < 4:
+            return pygame.Rect(355, 229 + index * 59, 410, 48)
+        return pygame.Rect(355 + (index-4)*215, 483, 195, 40)
 
     def _activate_pause(self, option):
         if option == "CONTINUE":
@@ -621,20 +875,34 @@ class Game:
             self.previous_state = "pause"
             self.state = "achievements"
         elif option == "BACK PAGES":
+            self.previous_state = "pause"
             self.state = "back_pages"
+        elif option == "CONTROLS":
+            self.previous_state = "pause"
+            self.state = "controls"
         elif option == "RESTART PAGE":
+            if hasattr(self, "boss_cinematic"):
+                self.boss_cinematic.cancel()
             self.level.restart_chapter(self.player, self.camera)
             self.weapons.erase_page_tools()
             self._apply_page_identity()
+            self.particles = ParticleSystem()
+            self.hit_stop = self.damage_flash = self.weapon_reveal_time = 0
+            self._buffered_actions = InputFrame()
+            self.transition_active = False
+            self.transition_snapshot = None
             self.sounds.set_combat(False)
             self.sounds.start_ambience(self.level.chapter_index)
             self.state = "playing"
         elif option == "TITLE":
-            self.state = "title"
+            if getattr(self, "training_only", False):
+                self.finish_training()
+            else:
+                self._return_to_title()
 
     @staticmethod
     def _settings_row_rect(index):
-        return pygame.Rect(275, 198 + index * 65, 675, 50)
+        return pygame.Rect(235, 165 + index * 59, 700, 48)
 
     @staticmethod
     def _back_pages_close_rect():
@@ -692,6 +960,14 @@ class Game:
         elif self.settings_index == 4 and direction:
             self._toggle_fullscreen()
             settings = self.save.data["settings"]
+        elif self.settings_index == 5 and direction:
+            current = SUPPORTED_LANGUAGES.index(normalize_language(settings["language"]))
+            step = 1 if direction > 0 else -1
+            settings["language"] = SUPPORTED_LANGUAGES[(current + step) % len(SUPPORTED_LANGUAGES)]
+            set_language(settings["language"])
+            from notebook_notes import NotebookAnnotations
+            self.renderer.notebook_notes = NotebookAnnotations()
+            self.renderer.notebook.tiles.clear()
         self.save.update_settings(settings)
         self.sounds.apply_settings(settings)
 
@@ -711,7 +987,8 @@ class Game:
             down=bool(keys[pygame.K_s] or keys[pygame.K_DOWN] or hat_y < 0
                       or self._joystick_axis(joystick, 1) > .5),
             jump_pressed=self.pending_input.jump_pressed,
-            jump_held=bool(keys[pygame.K_SPACE] or self._joystick_button(joystick, 0)),
+            jump_held=bool(keys[pygame.K_SPACE] or keys[pygame.K_w] or keys[pygame.K_UP]
+                           or self._joystick_button(joystick, 0)),
             jump_released=self.pending_input.jump_released,
             interact=self.pending_input.interact,
             attack_pressed=self.pending_input.attack_pressed,
@@ -735,12 +1012,17 @@ class Game:
         if self.state not in ("playing", "ending"):
             return
         if self.state == "ending":
-            self._update_ending(dt)
+            self._update_ending(dt, input_frame or self._sample_input())
             return
         if self.transition_active:
             self._update_transition(dt)
             return
         frame = input_frame or self._sample_input()
+        if self.boss_cinematic.active:
+            self.boss_cinematic.update(dt)
+            self.particles.update(dt*.15)
+            self.session_seconds += dt
+            return
         self.damage_flash = max(0.0, self.damage_flash - dt)
         if self.hit_stop > 0:
             # Freeze the simulation, not the player's intent.  A jump, dash,
@@ -794,24 +1076,39 @@ class Game:
                                              current_weapon.reload_time))) if current_weapon.reloading else None
         self.player.set_weapon_pose(self.weapons.current_id, aim_angle,
                                     .7 if fired else 0, reload_progress)
+        self.level.refresh_drawings(self.player)
         self.player.update(dt, frame.axis, self.level.world, self.particles)
+        lesson = getattr(self.level.runtime, "training", None)
+        if lesson is not None:
+            lesson.observe(frame, self.player)
         combatants = [enemy for entity in self.level.entities.items
                       if getattr(entity, "encounter_active", False)
                       for enemy in getattr(entity, "enemies", ())]
         self.behavior.observe_combat(dt, self.player, combatants)
         self.level.update(dt, self.player, self.camera, self.particles, self.sounds,
                           frame.interact, self.session_seconds)
-        self.weapons.update(dt, context, self.level.entities)
+        self._update_combat_music()
+        if self.boss_cinematic.maybe_begin():
+            return
+        # Respawn can replace the world during Level.update. Never let old
+        # projectiles or a pending attack operate on the discarded page.
+        if context.world is not self.level.world:
+            context = self.level.context(self.player, self.camera, self.particles, self.sounds)
+        if self.level.respawn_timer <= 0 and self.player.health > 0:
+            self.weapons.update(dt, context, self.level.entities)
         if self.weapons.current_id != self._visual_weapon_id:
             self._visual_weapon_id = self.weapons.current_id
-            self.weapon_reveal_time = 2.8
-        else:
+            self.weapon_reveal_time = 2.4 if self.weapons.current_id != "unarmed" else 0
+        elif self._can_show_weapon_reveal():
             self.weapon_reveal_time = max(0.0, self.weapon_reveal_time - dt)
         self.artist_companion.update(dt, self, frame)
         self.particles.update(dt)
         self.camera.update(dt, self.player.center_x, self.level.world.width,
-                           self.player.vx, self.player.y)
+                           self.player.vx, self.player.y, player_locked=self.player.locked)
         self.session_seconds += dt
+        if getattr(self, "training_only", False) and lesson is not None and lesson.completed:
+            self.finish_training(completed=True)
+            return
         if self.level.chapter_complete:
             final_index = int(getattr(self.level.runtime, "campaign_last_index", 4))
             if self.level.chapter_index >= final_index:
@@ -819,14 +1116,52 @@ class Game:
             else:
                 self._start_transition()
 
+    def _update_combat_music(self):
+        active_rooms = [room for room in self.level.entities.items
+                        if getattr(room, "encounter_active", False)
+                        and not getattr(room, "completed", False)]
+        if not active_rooms or self.level.respawn_timer > 0:
+            self.sounds.set_combat(False)
+            return
+        boss_room = next((room for room in active_rooms
+                         if getattr(room, "boss_cue_started", False)
+                         and getattr(room, "boss_kind", None)), None)
+        boss = next((enemy for room in active_rooms for enemy in getattr(room, "enemies", ())
+                     if getattr(enemy, "is_boss", False)), None)
+        # Arena victory waits for its clear beat after the boss body vanishes.
+        # Keep that encounter's identity until it actually opens the gates.
+        boss_kind = (boss_room.boss_kind if boss_room is not None
+                     else getattr(boss, "kind", None))
+        self.sounds.set_combat(True, boss_room is not None or boss is not None, boss_kind)
+
     def _update_achievements(self, dt):
-        self.achievement_time = max(0.0, self.achievement_time - dt)
         if self.state in ("playing", "ending"):
             self.achievements.evaluate(self)
+        if not self._quiet_notification_context():
+            return
+        self.achievement_time = max(0.0, self.achievement_time - dt)
         if self.achievement_time <= 0 and self.achievements.pending:
             self.achievement_banner = self.achievements.pending.popleft()
             self.achievement_time = 4.2
             self.sounds.play("pickup")
+
+    def _quiet_notification_context(self):
+        """Critical page messages and live warnings own the notebook margin."""
+        return (self.state == "playing" and not self.transition_active
+                and self.player.health > 0 and not self.player.locked
+                and self.player.draw_amount >= 1
+                and self.level.respawn_timer <= 0 and self.level.toast_time <= 0
+                and self.level.director.canvas_owner is None
+                and not self.level.director.tool.visible
+                and not any(getattr(e, "letter_time", 0) > 0 or
+                            (getattr(e, "encounter_active", False) and
+                             not getattr(e, "completed", False))
+                            for e in self.level.entities.items))
+
+    def _can_show_weapon_reveal(self):
+        return (self._quiet_notification_context() and self.achievement_time <= 0
+                and not any(getattr(e, "boss_intro_time", 0) > 0
+                            for e in self.level.entities.items))
 
     def request_hit_stop(self, duration):
         """Request a short combat freeze without coupling enemies to Game internals."""
@@ -836,6 +1171,7 @@ class Game:
         self.request_hit_stop(duration)
         self.damage_flash = max(self.damage_flash, .18)
         self.behavior.record("damage", page=self.level.chapter_index)
+        self.artist_director.record_damage(self)
 
     def _buffer_action_input(self, frame):
         buffered = self._buffered_actions
@@ -927,6 +1263,8 @@ class Game:
         self.blank_player_x = 150
         self.sounds.quiet_ambience(True)
         self.save.mark_complete(self.session_seconds)
+        from afterword import Afterword
+        self.afterword = Afterword(self.save.data.get("secrets", ()))
 
     def _record_page_complete(self):
         if getattr(self.level, "completion_recorded", False):
@@ -936,7 +1274,7 @@ class Game:
                              seconds=max(0.0, self.session_seconds - self.page_started_at))
         self.persist_behavior(write=True)
 
-    def _update_ending(self, dt):
+    def _update_ending(self, dt, frame=None):
         self.ending_time += dt
         if not self.ending_tools_erased and self.ending_time >= .58:
             self._erase_current_page_tools()
@@ -944,8 +1282,9 @@ class Game:
             self.sounds.play("erase")
         if self.ending_time >= 1.0 and self.ending_time - dt < 1.0:
             self.sounds.play("page")
-        if self.ending_time > 3.3:
-            self.blank_player_x = min(900, self.blank_player_x + dt * 48)
+        if self.ending_time > 3.3 and hasattr(self, "afterword"):
+            self.afterword.update(min(dt, self.ending_time-3.3), frame or InputFrame(), self.sounds)
+            self.session_seconds += dt
 
     def draw(self):
         if self.state == "title":
@@ -956,8 +1295,20 @@ class Game:
             self._draw_back_pages()
         elif self.state == "achievements":
             self._draw_achievements()
+        elif self.state == "controls":
+            self._draw_controls()
+        elif self.state == "credits":
+            from scene_music import MUSIC_CREDITS
+            from soundtrack_credits import draw_music_credits
+            draw_music_credits(self.screen, self.renderer, MUSIC_CREDITS,
+                               self.save.data["settings"]["language"],
+                               getattr(self, "music_credit_page", 0))
         elif self.state == "ending":
             self._draw_ending()
+        elif self.state == "replay_pages":
+            from page_replay import draw_replay_pages
+            draw_replay_pages(self.screen, self.renderer, self.replay_page_index,
+                              controller=self.last_input_device == "controller")
         else:
             self._draw_scene(self.screen)
             if self.damage_flash > 0:
@@ -969,23 +1320,31 @@ class Game:
                 self._draw_hud()
             if self.state == "pause":
                 self._draw_pause()
-        if self.state == "playing" and not self.transition_active:
+        if self.state == "playing" and not self.transition_active and not self.boss_cinematic.active:
             self._draw_aim_cursor()
-            if self.weapon_reveal_time > 0:
+            if self.weapon_reveal_time > 0 and self._can_show_weapon_reveal():
                 self._draw_weapon_reveal()
             if (not self.player.locked and self.level.toast_time <= 0 and self.achievement_time <= 0
-                    and not any(getattr(e,'letter_time',0)>0 or getattr(e,'encounter_active',False)
+                    and self.level.director.canvas_owner is None
+                    and not self.level.director.tool.visible
+                    and not any(getattr(e,'letter_time',0)>0 or
+                                (getattr(e,'encounter_active',False) and
+                                 not getattr(e,'completed',False))
                                 for e in self.level.entities.items)) :
                 self.artist_companion.draw(self.screen, self.renderer, self.last_input_device == "controller")
-        if self.achievement_banner is not None and self.achievement_time > 0:
+        if (self.achievement_banner is not None and self.achievement_time > 0
+                and self._quiet_notification_context()):
             self._draw_achievement_banner()
-        if self.state in ("title", "settings", "pause", "back_pages", "achievements"):
+        if self.state in ("title", "settings", "pause", "back_pages", "achievements", "controls", "credits", "replay_pages"):
             self._draw_pencil_cursor()
 
     def _draw_scene(self, target):
         world = self.level.world
         self.renderer.background(target, world.page)
-        self.renderer.draw_world_backdrop(target, self.camera, world.page, self.time)
+        boss_arena = next((e for e in self.level.entities.items
+            if getattr(e, "is_combat_arena", False) and getattr(e, "boss", False)
+            and e.start_x-350 <= self.player.center_x <= e.end_x+350), None)
+        self.renderer.draw_world_backdrop(target, self.camera, world.page, self.time, arena=boss_arena)
         if world.active_layer == 1:
             shade = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
             shade.fill((70, 61, 49, 20))
@@ -993,18 +1352,29 @@ class Game:
         # Draw onto the opaque paper canvas. The native macOS blitter can
         # miscompose a full-screen intermediate RGBA layer and hide the page.
         ink = target
-        world.draw(ink, self.camera, self.renderer, self.time)
-        self.level.draw_entities(ink, self.camera, self.renderer)
+        world.draw(ink, self.camera, self.renderer, self.time,
+                   show_notes=not self.boss_cinematic.active)
+        if not self.boss_cinematic.active:
+            self.level.director.draw_messages(ink, self.camera, self.renderer)
+        if self.boss_cinematic.active:
+            self.boss_cinematic.owner.draw(ink, self.camera, self.renderer)
+        else:
+            self.level.draw_entities(ink, self.camera, self.renderer)
         self.weapons.draw_world(ink, self.camera, self.renderer)
         self.particles.draw(ink, self.camera)
         self.player.draw(ink, self.camera)
-        self.level.director.draw(target, self.camera, self.renderer)
-        self.level.draw_artist_overlay(target, self.camera, self.renderer)
-        for entity in self.level.entities.items:
-            draw_overlay = getattr(entity, "draw_overlay", None)
-            if callable(draw_overlay): draw_overlay(target, self.camera, self.renderer)
+        if not self.boss_cinematic.active:
+            self.level.director.draw_tool(target, self.camera)
+            self.level.draw_artist_overlay(target, self.camera, self.renderer)
+        if not self.boss_cinematic.active:
+            for entity in self.level.entities.items:
+                draw_overlay = getattr(entity, "draw_overlay", None)
+                if callable(draw_overlay):
+                    draw_overlay(target, self.camera, self.renderer)
         if self.level.fold_progress > 0:
             self._draw_fold(target, self.level.fold_progress)
+        self.boss_cinematic.draw_hand(target, self.camera, self.renderer)
+        self.boss_cinematic.present(target, self.renderer)
 
     def _draw_fold(self, target, progress):
         width = round(270 * progress)
@@ -1088,46 +1458,49 @@ class Game:
                                       self.renderer.font_small, -1)
 
     def _draw_hud(self):
+        if self.boss_cinematic.active:
+            return
         self.weapons.draw_hud(self.screen, self.renderer,
                               controller=self.last_input_device == "controller")
-        dash_ready = self.player.dash_ready
-        dash_duration = .68 - getattr(self.player, "sketch_dash_recovery", 0)
-        dash_fill = 1.0 if dash_ready else max(0.0, 1.0 - self.player.dash_cooldown / dash_duration)
-        dash_label = "PAD-B  DASH" if self.last_input_device == "controller" else "SHIFT  DASH"
-        dash_panel = pygame.Surface((158, 68), pygame.SRCALPHA)
-        dash_panel.fill((247, 243, 224, 232))
-        self.screen.blit(dash_panel, (938, 618))
-        self.renderer.rough_rect(self.screen, INK_LIGHT, pygame.Rect(938,618,158,68), 1, 476)
-        self.renderer.doodle_text(self.screen, dash_label, (951, 626),
-                                  INK if dash_ready else INK_LIGHT,
-                                  self.renderer.font_small, -1)
-        jitter_line(self.screen, INK_LIGHT, (952, 671), (1080, 671), 2, 477, 1, .8)
-        self.renderer.doodle_text(self.screen, "READY" if dash_ready else "REDRAWING",
-                                  (951,648), INK if dash_ready else INK_LIGHT,
-                                  self.renderer.font_small)
-        if dash_fill > 0:
-            jitter_line(self.screen, INK, (952, 671), (952 + 128 * dash_fill, 671),
-                        3, 478, 1, 1.1)
+        # The margin carries only a spent ability. A ready dash does not
+        # need a permanent panel competing with the fight.
+        if self.player.dash_cooldown > 0 and not self.player.locked:
+            duration = .68 - getattr(self.player, "sketch_dash_recovery", 0)
+            fill = max(0.0, min(1.0, 1 - self.player.dash_cooldown / duration))
+            rect = pygame.Rect(948, 645, 148, 39)
+            plate = pygame.Surface(rect.size, pygame.SRCALPHA)
+            plate.fill((247, 243, 224, 228))
+            self.screen.blit(plate, rect)
+            self.renderer.doodle_text(self.screen, "dash", (960, 647), INK_LIGHT,
+                                      self.renderer.font_small)
+            jitter_line(self.screen, (176, 162, 141), (959, 676), (1082, 676),
+                        2, 477, 1, .7)
+            jitter_line(self.screen, INK, (959, 676), (959 + 123 * fill, 676),
+                        3, 478, 1, .7)
         draw_health(self.screen, self.renderer, self.player, self.time)
         if self.level.page_title_time > 0 and self.level.toast_time <= 0:
             alpha = min(1, self.level.page_title_time, 4.2 - self.level.page_title_time)
             panel = pygame.Surface((440, 90), pygame.SRCALPHA)
             panel.fill((247, 243, 224, 225))
             self.renderer.doodle_text(panel, self.level.title, (18, 13), INK_LIGHT, self.renderer.font_small)
-            self.renderer.doodle_text(panel, self.level.subtitle, (18, 37), INK, self.renderer.font)
+            subtitle = fitted_label(self.renderer.font, self.level.subtitle, INK, 404)
+            panel.blit(subtitle, (18, 37))
             panel.set_alpha(round(255 * max(0, alpha)))
-            self.screen.blit(panel, (263, 18))
+            self.screen.blit(panel, (210, 18))
         if self.level.interaction_hint:
-            hint = self.level.interaction_hint
-            if self.last_input_device == "controller" and hint.startswith("E  "):
-                hint = "PAD-Y  " + hint[3:]
-            text = self.renderer.font_small.render(hint, True, INK)
+            hint = translate(self.level.interaction_hint)
+            if self.last_input_device == "controller":
+                if hint.startswith("E  "):
+                    hint = "PAD-Y  " + hint[3:]
+                elif hint.startswith("E / "):
+                    hint = "PAD-Y / " + hint[4:]
+            text = fitted_label(self.renderer.font_small, hint, INK, 810)
             bg = pygame.Surface((text.get_width() + 26, 38), pygame.SRCALPHA)
             bg.fill((247, 243, 224, 218))
             x = WIDTH // 2 - bg.get_width() // 2
             self.screen.blit(bg, (x, HEIGHT - 148))
             self.screen.blit(text, (x + 13, HEIGHT - 138))
-        if self.level.toast_time > 0:
+        if self.level.toast_time > 0 and str(self.level.toast).strip():
             lines = wrap_text(self.level.toast, self.renderer.font_small, 520)
             width = max(self.renderer.font_small.size(line)[0] for line in lines) + 28
             panel = pygame.Surface((width, 22 + 22 * len(lines)), pygame.SRCALPHA)
@@ -1141,12 +1514,14 @@ class Game:
 
     def _draw_weapon_reveal(self):
         """Briefly show the actual new drawing at readable size after equipping."""
+        if self.weapons.current_id == "unarmed":
+            return
         from page_arsenal import draw_weapon_icon
         profile = self.weapons.profile()
         panel = pygame.Surface((314, 126), pygame.SRCALPHA)
         panel.fill((247, 243, 224, 238))
         self.renderer.rough_rect(panel, INK_LIGHT, pygame.Rect(3, 3, 308, 120), 1, 8102)
-        self.renderer.doodle_text(panel, "NOW DRAWING", (14, 10), profile.accent,
+        self.renderer.doodle_text(panel, "IN HAND", (14, 10), profile.accent,
                                   self.renderer.font_small, -1)
         label_lines = wrap_text(profile.label, self.renderer.font_small, 157)[:2]
         for index, line in enumerate(label_lines):
@@ -1165,83 +1540,138 @@ class Game:
 
     def _draw_title(self):
         self.renderer.background(self.screen, 0)
-        jitter_line(self.screen, INK, (155, 280), (965, 280), 4, 82, 2, 2)
-        title = pygame.transform.rotate(self.renderer.font_big.render("TURN THE PAGE", True, INK), -1.2)
-        self.screen.blit(title, title.get_rect(center=(WIDTH // 2, 190)))
-        self.renderer.doodle_text(self.screen, "something is still drawing", (435, 244), INK_LIGHT,
-                                  self.renderer.font_small, 1)
+        self.renderer.doodle_text(self.screen, "TURN THE PAGE", (143,100), INK,
+                                  self.renderer.font_big,-1)
+        self.renderer.doodle_text(self.screen, getattr(self, "title_notice", "") or "Every line leaves a mark.",
+                                  (154,181), INK_LIGHT, self.renderer.font_small,1)
+        jitter_line(self.screen,INK,(151,225),(963,225),3,82,2,1.4)
         options = self._title_options()
         self.menu_index %= len(options)
-        mouse_pos = self._window_to_canvas(pygame.mouse.get_pos())
+        active_index = self._active_menu_index(self.menu_index,
+            tuple(self._menu_rect(i, len(options)) for i in range(len(options))))
         for i, option in enumerate(options):
-            rect = self._menu_rect(i, len(options))
-            selected = i == self.menu_index or (mouse_pos is not None and rect.collidepoint(mouse_pos))
+            rect = self._menu_rect(i,len(options))
+            selected = i == active_index
+            pygame.draw.rect(self.screen, (231,222,193) if selected else (245,239,216),rect)
+            self.renderer.rough_rect(self.screen,INK if selected else INK_LIGHT,rect,2 if selected else 1,100+i*7)
+            label = fitted_label(self.renderer.font, option, INK, rect.width - 90)
+            self.screen.blit(label,(rect.x+34,rect.centery-label.get_height()//2))
             if selected:
-                pygame.draw.rect(self.screen, (232, 225, 201), rect, border_radius=3)
-                self.renderer.doodle_text(self.screen, ">", (rect.x + 16, rect.y + 11), font=self.renderer.font)
-            self.renderer.rough_rect(self.screen, INK_LIGHT if not selected else INK, rect, 2, 100 + i * 7)
-            label = self.renderer.font.render(option, True, INK)
-            self.screen.blit(label, label.get_rect(center=rect.center))
-        secrets = len(self.save.data.get("secrets", []))
-        if secrets:
-            self.renderer.doodle_text(self.screen, f"BACK PAGES: {secrets} / 12", (890, 655),
-                                      INK_LIGHT, self.renderer.font_small, -1)
-        if self.joysticks:
-            self.renderer.doodle_text(self.screen, "CONTROLLER CONNECTED", (24, 655),
-                                      INK_LIGHT, self.renderer.font_small, -1)
-        version = self.renderer.font_small.render(VERSION, True, INK_LIGHT)
-        self.screen.blit(version, version.get_rect(center=(WIDTH // 2, 665)))
+                self.renderer.doodle_text(self.screen,">",(rect.right-35,rect.y+15),INK,self.renderer.font)
+        # A physical notebook cover and its actual tools share the title screen.
+        from page_arsenal import draw_weapon_icon
+        panel = pygame.Rect(595,278,382,284)
+        pygame.draw.polygon(self.screen,(235,226,198),[(panel.x+8,panel.y),(panel.right,panel.y+9),
+                            (panel.right-7,panel.bottom),(panel.x,panel.bottom-12)])
+        self.renderer.rough_rect(self.screen,INK_LIGHT,panel,2,20301)
+        self.renderer.doodle_text(self.screen,"FIELD NOTES / "+".".join(VERSION.split(".")[:2]),
+                                  (615,294),(139,57,50),self.renderer.font_small,-1)
+        for weapon,page,center in (("fold_crossbow",0,(665,402)),("orbit_saw",2,(786,402)),
+                                    ("carbon_lance",3,(905,402))):
+            draw_weapon_icon(self.screen,weapon,page,center,size=100)
+        slogan = fitted_label(self.renderer.font_small, "Hidden margins. Optional routes.", INK, panel.width-40)
+        self.screen.blit(slogan, (615,486))
+        language = translate("Language") + " / " + LANGUAGE_NAMES[normalize_language(self.save.data["settings"]["language"])]
+        self.renderer.rough_rect(self.screen,INK_LIGHT,LANGUAGE_RECT,1,20211)
+        language_image = fitted_label(self.renderer.font_small, language, INK_LIGHT, LANGUAGE_RECT.width - 20)
+        self.screen.blit(language_image, language_image.get_rect(center=LANGUAGE_RECT.center))
+        self.renderer.doodle_text(self.screen,
+                                  "PAD-A: choose" if self.last_input_device == "controller" else "Enter / click: choose",
+                                  (154,632),INK_LIGHT,self.renderer.font_small)
+        self.renderer.doodle_text(self.screen,"v"+VERSION.split("-")[0],(154,661),INK_LIGHT,self.renderer.font_small)
+        self.renderer.rough_rect(self.screen, INK_LIGHT, MUSIC_CREDITS_RECT, 1, 20319)
+        credit_label = translate("MUSIC CREDITS")
+        credit_key = "Y" if self.last_input_device == "controller" else "C"
+        credit_image = fitted_label(self.renderer.font_small, credit_label + " / " + credit_key, INK_LIGHT, MUSIC_CREDITS_RECT.width - 20)
+        self.screen.blit(credit_image, credit_image.get_rect(center=MUSIC_CREDITS_RECT.center))
 
-    def _menu_rect(self, index, count):
-        start = 340 - (count - 3) * 28
-        return pygame.Rect(WIDTH // 2 - 145, start + index * 66, 290, 50)
+    def _menu_rect(self,index,count):
+        return pygame.Rect(154,270+index*(55 if count >= 6 else 62),354,48 if count >= 6 else 52)
+
+    def _active_menu_index(self, selected, rects):
+        if self.last_input_device == "mouse":
+            mouse_pos = self._window_to_canvas(pygame.mouse.get_pos())
+            if mouse_pos is not None:
+                return next((i for i, rect in enumerate(rects)
+                             if rect.collidepoint(mouse_pos)), selected)
+        return selected
+
+    def _draw_controls(self):
+        self.renderer.background(self.screen,0)
+        self.renderer.doodle_text(self.screen,"CONTROLS",(112,65),INK,self.renderer.font_big,-1)
+        rows = (("Move","A / D  ·  ← / →"),("Jump","Space / W / Up  ·  release for a short jump"),
+                ("Attack","F / J  ·  left click aims at the pointer"),("Dash / return","Shift / K  ·  right click"),
+                ("Interact / sketch","E"),("Reload / switch","R  /  Q or mouse wheel"),
+                ("Drop through","S or Down + any jump key"),("Pause / fullscreen","ESC  /  F11"))
+        for index,(label,keys) in enumerate(rows):
+            y = 206+index*45
+            label_image = fitted_label(self.renderer.font, label, INK, 290)
+            self.screen.blit(label_image, (121, y))
+            key_image = fitted_label(self.renderer.font_small, keys, INK_LIGHT, 578)
+            self.screen.blit(key_image, (432, y+5))
+            pygame.draw.line(self.screen,(194,181,149),(115,y+34),(1010,y+34),1)
+        rect=self._back_pages_close_rect()
+        self.renderer.rough_rect(self.screen,INK_LIGHT,rect,1,20500)
+        label=self.renderer.font_small.render(
+            "PAD-A / PAD-B   Back" if self.last_input_device == "controller"
+            else "ENTER / ESC   Back", True, INK)
+        self.screen.blit(label,label.get_rect(center=rect.center))
 
     def _draw_pause(self):
         veil = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
         veil.fill((244, 240, 220, 205))
         self.screen.blit(veil, (0, 0))
-        self.renderer.doodle_text(self.screen, "page held open", (WIDTH // 2 - 145, 175), INK,
-                                  self.renderer.font_big, -1)
-        mouse_pos = self._window_to_canvas(pygame.mouse.get_pos())
+        heading = self.renderer.font_big.render("page held open", True, INK)
+        self.screen.blit(heading, heading.get_rect(center=(WIDTH//2, 158)))
         options = self._pause_options()
         self.pause_index %= len(options)
+        active_index = self._active_menu_index(self.pause_index,
+            tuple(self._pause_rect(i) for i in range(len(options))))
         for i, text in enumerate(options):
             rect = self._pause_rect(i)
-            selected = i == self.pause_index or (mouse_pos is not None
-                                                  and rect.collidepoint(mouse_pos))
+            selected = i == active_index
             if selected:
                 pygame.draw.rect(self.screen, (232, 225, 201), rect, border_radius=3)
             self.renderer.rough_rect(self.screen, INK if selected else INK_LIGHT,
                                      rect, 2, 610 + i * 13)
-            label = self.renderer.font_small.render(text, True, INK)
+            label = fitted_label(self.renderer.font_small, text, INK, rect.width-22)
             self.screen.blit(label, label.get_rect(center=rect.center))
         footer = ("D-PAD choose   •   PAD-A confirm   •   PAD-B continue"
                   if self.last_input_device == "controller"
-                  else "ESC continue   •   shortcuts B / R / S / Q")
-        self.renderer.doodle_text(self.screen, footer, (355, 577), INK_LIGHT,
-                                  self.renderer.font_small)
+                  else "ESC continue  ·  arrows select  ·  ENTER confirm")
+        footer_image = fitted_label(self.renderer.font_small, footer, INK_LIGHT, WIDTH-160)
+        self.screen.blit(footer_image, footer_image.get_rect(center=(WIDTH//2, 589)))
 
     def _draw_back_pages(self):
         self.renderer.background(self.screen, 4)
-        self.renderer.doodle_text(self.screen, "BACK PAGES", (118, 75), INK,
-                                  self.renderer.font_big, -1)
+        heading = fitted_label(self.renderer.font_big, "BACK PAGES", INK, 560)
+        self.screen.blit(heading, (118, 48))
         self.renderer.doodle_text(
             self.screen,
-            "Rejected drawings. Real techniques. Learned ideas survive every redraw.",
-            (78, 132), INK_LIGHT, self.renderer.font_small,
+            "Learned techniques survive every redraw.",
+            (78, 149), INK_LIGHT, self.renderer.font_small,
         )
         secrets = set(self.save.data.get("secrets", []))
-        for index, sketch in enumerate(SKETCHES):
+        page = getattr(self,"sketch_page",0) % ((len(SKETCHES)+8)//9)
+        for index, sketch in enumerate(SKETCHES[page*9:(page+1)*9]):
             col, row = index % 3, index // 3
-            rect = pygame.Rect(78 + col * 325, 176 + row * 108, 315, 100)
+            rect = pygame.Rect(78 + col * 325, 192 + row * 132, 315, 123)
             draw_sketch_card(self.screen, rect, sketch, self.renderer,
                              sketch.secret_id in secrets, self.weapons.available_ids)
+        for text,rect in (("ACHIEVEMENTS",pygame.Rect(705,65,170,38)),("CONTROLS",pygame.Rect(885,65,160,38))):
+            self.renderer.rough_rect(self.screen,INK_LIGHT,rect,1,rect.x)
+            image = fitted_label(self.renderer.font_small, text, INK, rect.width-16)
+            self.screen.blit(image,image.get_rect(center=rect.center))
+        self.renderer.doodle_text(self.screen,f"RUNES: {len(secrets)} / {len(SKETCHES)}",(80,586),INK_LIGHT,self.renderer.font_small)
+        self.renderer.doodle_text(self.screen,f"PAGE {page+1} / {(len(SKETCHES)+8)//9}",(530,586),INK_LIGHT,self.renderer.font_small)
+        self.renderer.rough_rect(self.screen,INK_LIGHT,pygame.Rect(880,595,140,32),1,2323)
+        self.renderer.doodle_text(self.screen,"next  >",(903,599),INK,self.renderer.font_small)
         close_rect = self._back_pages_close_rect()
         self.renderer.rough_rect(self.screen, INK_LIGHT, close_rect, 2, 1881)
         close_label = ("PAD-A / PAD-B   close the back cover"
                        if self.last_input_device == "controller"
                        else "B / ESC   close the back cover")
-        close = self.renderer.font_small.render(close_label, True, INK_LIGHT)
+        close = fitted_label(self.renderer.font_small, close_label, INK_LIGHT, close_rect.width-16)
         self.screen.blit(close, close.get_rect(center=close_rect.center))
 
     def _turn_achievement_page(self, delta):
@@ -1256,6 +1686,8 @@ class Game:
             f"{self.achievements.count} / {self.achievements.total} clipped into the notebook",
             (90, 116), INK_LIGHT, self.renderer.font_small, 1,
         )
+        if not hasattr(self.renderer,"font_caption"):
+            self.renderer.font_caption = LocalizedFont(pygame.font.Font(pygame.font.match_font("arial,dejavusans"),17))
         page = getattr(self, 'achievement_page', 0) % ((len(ACHIEVEMENTS)+15)//16)
         for index, achievement in enumerate(ACHIEVEMENTS[page*16:(page+1)*16]):
             column, row = index % 2, index // 2
@@ -1271,15 +1703,15 @@ class Game:
             title = ("?????" if achievement.hidden and not unlocked
                      else achievement.title)
             self.renderer.doodle_text(self.screen, title,
-                                      (rect.x + 48, rect.y + 8), color,
+                                      (rect.x + 48, rect.y + 3), color,
                                       self.renderer.font_small, -1 if index % 2 else 1)
             description = (achievement.description if unlocked else
                            "condition not written down" if achievement.hidden else
                            achievement.description)
-            small = self.renderer.font_small.render(description, True,
+            small = self.renderer.font_caption.render(description, True,
                                                     INK_LIGHT if unlocked else color)
             if small.get_width() > rect.width - 60:
-                small = pygame.transform.smoothscale(small,
+                small = pygame.transform.scale(small,
                     (rect.width-60, max(16, round(small.get_height()*(rect.width-60)/small.get_width()))))
             self.screen.blit(small, (rect.x + 48, rect.y + 30))
         for direction, label, x in ((-1, "<  previous", 300), (1, "next  >", 680)):
@@ -1314,7 +1746,7 @@ class Game:
 
     def _draw_settings(self):
         self.renderer.background(self.screen, 0)
-        self.renderer.doodle_text(self.screen, "SETTINGS", (420, 115), INK, self.renderer.font_big, -1)
+        self.renderer.doodle_text(self.screen, "SETTINGS", (420, 85), INK, self.renderer.font_big, -1)
         settings = self.save.data["settings"]
         rows = [
             ("Master volume", settings["master_volume"]),
@@ -1322,18 +1754,20 @@ class Game:
             ("Music volume", settings["music_volume"]),
             ("Window size", f"{self.windowed_size[0]} x {self.windowed_size[1]}"),
             ("Fullscreen", "YES" if settings["fullscreen"] else "NO"),
-            ("Back", "ENTER"),
+            ("Language", LANGUAGE_NAMES[normalize_language(settings["language"])]),
+            ("Back", "PAD-A" if self.last_input_device == "controller" else "ENTER"),
         ]
-        mouse_pos = self._window_to_canvas(pygame.mouse.get_pos())
+        active_index = self._active_menu_index(self.settings_index,
+            tuple(self._settings_row_rect(i) for i in range(len(rows))))
         for i, (label, value) in enumerate(rows):
-            y = 210 + i * 65
-            selected = i == self.settings_index or (mouse_pos is not None
-                                                     and self._settings_row_rect(i).collidepoint(mouse_pos))
+            y = 174 + i * 59
+            selected = i == active_index
             if selected:
                 pygame.draw.rect(self.screen, (235, 229, 208), self._settings_row_rect(i),
                                  border_radius=3)
                 self.renderer.doodle_text(self.screen, ">", (290, y), INK, self.renderer.font)
-            self.renderer.doodle_text(self.screen, label, (330, y), INK, self.renderer.font)
+            label_image = fitted_label(self.renderer.font, label, INK, 288)
+            self.screen.blit(label_image, (330, y))
             if i < 3:
                 value = max(0.0, min(1.0, float(value)))
                 pygame.draw.line(self.screen, INK_LIGHT, (640, y + 15), (850, y + 15), 2)
@@ -1341,13 +1775,13 @@ class Game:
                 self.renderer.doodle_text(self.screen, f"{round(value * 100):d}%",
                                           (875, y), INK_LIGHT, self.renderer.font_small)
             else:
-                self.renderer.doodle_text(self.screen, str(value), (680, y), INK_LIGHT,
-                                          self.renderer.font)
+                value_image = fitted_label(self.renderer.font, str(value), INK_LIGHT, 228)
+                self.screen.blit(value_image, (680, y))
         footer = ("D-PAD change  •  PAD-A confirm  •  PAD-B returns"
                   if self.last_input_device == "controller"
                   else "click or use arrows  •  F11 fullscreen  •  ESC returns")
-        self.renderer.doodle_text(self.screen, footer, (350, 625), INK_LIGHT,
-                                  self.renderer.font_small)
+        footer_image = fitted_label(self.renderer.font_small, footer, INK_LIGHT, WIDTH-160)
+        self.screen.blit(footer_image, footer_image.get_rect(center=(WIDTH//2, 637)))
 
     def _draw_ending(self):
         if self.transition_snapshot is None:
@@ -1369,24 +1803,8 @@ class Game:
             self.renderer.page_turn(self.screen, self.transition_snapshot, blank,
                                     (self.ending_time - 1.0) / 2.3)
             return
-        self.screen.blit(blank, (0, 0))
-        old_x, old_y = self.player.x, self.player.y
-        old_vx, old_ground = self.player.vx, self.player.on_ground
-        self.player.x, self.player.y = self.blank_player_x, 500
-        self.player.vx, self.player.on_ground = 48, True
-        ending_camera = Camera(WIDTH)
-        self.player.draw(self.screen, ending_camera)
-        self.player.x, self.player.y, self.player.vx, self.player.on_ground = old_x, old_y, old_vx, old_ground
-        if self.ending_time > 8:
-            tip_x = min(710, round(230 + (self.ending_time - 8) * 65))
-            pygame.draw.line(self.screen, (208, 143, 49), (tip_x + 20, 520), (tip_x + 300, 310), 25)
-            pygame.draw.polygon(self.screen, (216, 181, 126), [(tip_x, 534), (tip_x + 34, 507), (tip_x + 39, 520)])
-            length = max(0, tip_x - 330)
-            if self.ending_time > 10.5:
-                jitter_line(self.screen, INK, (260, 560), (260 + length, 560), 2, 999, 2, 1.4)
-        if self.ending_time > 13:
-            msg = self.renderer.font_small.render("the page remains open   —   ENTER", True, INK_LIGHT)
-            self.screen.blit(msg, msg.get_rect(center=(WIDTH // 2, 650)))
+        self.afterword.draw(self.screen, self.renderer,
+                            self.last_input_device == "controller")
 
     def _draw_pencil_cursor(self):
         pos = self._window_to_canvas(pygame.mouse.get_pos(), clamp=True)
@@ -1398,6 +1816,8 @@ class Game:
                                                          (x + 23, y + 24), (x + 17, y + 29)])
 
     def _draw_aim_cursor(self):
+        if self.weapons.current_id == "unarmed" or self.player.locked:
+            return
         if self.last_input_device == "controller":
             return
         pos = self._window_to_canvas(pygame.mouse.get_pos(), clamp=True)

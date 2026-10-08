@@ -172,7 +172,7 @@ class RoutePuzzleTests(unittest.TestCase):
         poster = next(e for e in runtime.entities.items
                       if isinstance(e, PerforatedPosterPuzzle))
         self.assertEqual((poster.ledge.x1, poster.ledge.x2, poster.ledge.y),
-                         (10370, 10654, 500))
+                         (runtime.pacing_map(10370), runtime.pacing_map(10654), 500))
         self.assertTrue(poster.ledge.collision_rects())
         level = SimpleNamespace(flags=set(), interaction_hint="", toast="", toast_time=0)
         sounds = _Sounds()
@@ -191,7 +191,7 @@ class RoutePuzzleTests(unittest.TestCase):
 
         # Jump onto the authored y500 shelf with the real controller, then
         # walk along it through the adjacent water-tower geometry.
-        player = Player(10400, 542)
+        player = Player(runtime.pacing_map(10400), 542)
         player.on_ground = True
         ctx.player = player
         player.queue_jump()
@@ -204,11 +204,11 @@ class RoutePuzzleTests(unittest.TestCase):
                 break
         self.assertTrue(landed, "the raised poster shelf must be reachable")
         for _ in range(120):
-            if player.center_x >= 10618:
+            if player.center_x >= runtime.pacing_map(10618):
                 break
             player.update(1 / 60, 1, world, particles)
             poster.update(1 / 60, ctx)
-        self.assertGreaterEqual(player.center_x, 10618)
+        self.assertGreaterEqual(player.center_x, runtime.pacing_map(10618))
         self.assertEqual(player.rect.bottom, 500)
         self.assertTrue(player.start_dash(1, particles))
         for _ in range(12):

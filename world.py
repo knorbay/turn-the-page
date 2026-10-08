@@ -25,6 +25,58 @@ class InkPlatform:
     graphite: int = 38
     appearance: str = "ink_stroke"
     collidable: bool = True
+    activation_blocked: bool = field(default=False, init=False)
+    _activated: bool = field(default=False, init=False, repr=False, compare=False)
+    _owned_erases: dict[object, tuple[float, float]] = field(
+        default_factory=dict, init=False, repr=False, compare=False)
+    _pending_restores: list[tuple[float, float]] = field(
+        default_factory=list, init=False, repr=False, compare=False)
+
+    @property
+    def collider_active(self):
+        return (self.enabled and self.collidable and self.draw_progress >= 1.0
+                and not self.activation_blocked)
+
+    @property
+    def lifecycle_state(self):
+        if not self.enabled:
+            return "erased"
+        if self.draw_progress < 1:
+            return "drawing" if self.draw_progress > 0 else "waiting"
+        return "settling" if self.activation_blocked else "active"
+
+    def begin_drawing(self):
+        self.draw_progress = 0.0
+        self.enabled = True
+        self.activation_blocked = False
+        self._activated = False
+
+    def complete_drawing(self):
+        self.draw_progress = 1.0
+
+    def refresh_lifecycle(self, occupants):
+        """A completed stroke becomes solid only in unoccupied paper.
+
+        A direct progress assignment from an existing authored event follows
+        the same lifecycle. Once solid, normal actor contact never switches
+        the collider off. Only a new drawing or explicit erasure resets it.
+        """
+        if not self.enabled or self.draw_progress < 1 or not self.collidable:
+            self._activated = False
+            self.activation_blocked = False
+            return
+        # Retracing a hole must not create ink inside a falling actor. Only
+        # these new intervals wait; established landings remain solid.
+        self._pending_restores = [interval for interval in self._pending_restores
+                                  if any(r.colliderect(body)
+                                         for r in self._geometry_rects((interval,))
+                                         for body in occupants)]
+        if self._activated:
+            return
+        geometry = self._geometry_rects()
+        self.activation_blocked = any(r.colliderect(body)
+                                      for r in geometry for body in occupants)
+        self._activated = not self.activation_blocked
 
     @property
     def one_way(self):
@@ -32,7 +84,8 @@ class InkPlatform:
 
     @property
     def visible_x2(self):
-        return self.x1 + (self.x2 - self.x1) * self.draw_progress
+        progress = max(0.0, min(1.0, self.draw_progress))
+        return self.x1 + (self.x2 - self.x1) * progress
 
     def erase(self, start: float, end: float):
         start, end = max(self.x1, start), min(self.x2, end)
@@ -40,21 +93,58 @@ class InkPlatform:
             self.erased.append((start, end))
             self._merge_erased()
 
-    def _merge_erased(self):
+    def erase_owned(self, owner, start: float, end: float):
+        """A temporary edit has its own lifetime, independent of other cuts."""
+        start, end = max(self.x1, start), min(self.x2, end)
+        if start < end:
+            self._owned_erases[owner] = (start, end)
+
+    def restore_owned(self, owner):
+        interval = self._owned_erases.pop(owner, None)
+        if interval is None:
+            return
+        # Another cut can still own part of this hole. Queue only the ink
+        # actually being restored, then activate it at the next safe refresh.
+        pieces = [interval]
+        for cut_start, cut_end in self.erased_intervals:
+            remaining = []
+            for start, end in pieces:
+                if cut_end <= start or cut_start >= end:
+                    remaining.append((start, end))
+                else:
+                    if start < cut_start:
+                        remaining.append((start, cut_start))
+                    if cut_end < end:
+                        remaining.append((cut_end, end))
+            pieces = remaining
+        self._pending_restores = self._merged_ranges((*self._pending_restores, *pieces))
+
+    @property
+    def erased_intervals(self):
+        return self._merged_ranges((*self.erased, *self._owned_erases.values(),
+                                    *self._pending_restores))
+
+    @staticmethod
+    def _merged_ranges(ranges):
         merged = []
-        for start, end in sorted(self.erased):
+        for start, end in sorted(ranges):
             if merged and start <= merged[-1][1] + 2:
                 merged[-1] = (merged[-1][0], max(merged[-1][1], end))
             else:
                 merged.append((start, end))
-        self.erased = merged
+        return merged
+
+    def _merge_erased(self):
+        self.erased = self._merged_ranges(self.erased)
 
     def visible_intervals(self):
         if not self.enabled:
             return
         end = self.visible_x2
         cursor = self.x1
-        for a, b in self.erased:
+        for a, b in self.erased_intervals:
+            if cursor >= end:
+                break
             if a > cursor:
                 yield cursor, min(a, end)
             cursor = max(cursor, b)
@@ -62,10 +152,13 @@ class InkPlatform:
             yield cursor, end
 
     def collision_rects(self):
+        if not self.collider_active:
+            return []
+        return self._geometry_rects()
+
+    def _geometry_rects(self, intervals=None):
         rects = []
-        if not self.collidable:
-            return rects
-        for a, b in self.visible_intervals():
+        for a, b in self.visible_intervals() if intervals is None else intervals:
             if b - a <= 2:
                 continue
             if self.end_y is None or abs(self.end_y - self.y) < 1:
@@ -89,6 +182,18 @@ class InkPlatform:
         return self.y + (self.end_y - self.y) * t
 
     def draw(self, surface, camera):
+        if self.enabled and self.draw_progress >= 1:
+            for a, b in self._pending_restores:
+                if b < camera.x - 30 or a > camera.x + WIDTH + 30:
+                    continue
+                sx1, sx2 = camera.screen_x(a), camera.screen_x(b)
+                for px in range(sx1, sx2, 20):
+                    x = a + (px - sx1)
+                    right = min(px + 11, sx2)
+                    pygame.draw.line(surface, (153, 147, 129),
+                                     (px, round(self.y_at(x) + camera.offset_y)),
+                                     (right, round(self.y_at(x + right - px)
+                                                   + camera.offset_y)), 2)
         for index, (a, b) in enumerate(self.visible_intervals()):
             if b < camera.x - 30 or a > camera.x + WIDTH + 30:
                 continue
@@ -97,6 +202,13 @@ class InkPlatform:
             y2 = round(self.y_at(b) + camera.offset_y)
             ink = (self.graphite, self.graphite, min(55, self.graphite + 4))
             style = getattr(self, "appearance", "ink_stroke")
+            if self.collidable and not self.collider_active:
+                # Incomplete and occupied strokes remain pencil construction.
+                # The dark support edge appears with collision, never earlier.
+                for px in range(sx1, sx2, 20):
+                    pygame.draw.line(surface, (153, 147, 129),
+                                     (px, y1), (min(px+11, sx2), y1), 2)
+                continue
             if not self.collidable:
                 # Pencil construction is scenery, never a dark landing edge.
                 for px in range(sx1, sx2, 24):
@@ -112,6 +224,26 @@ class InkPlatform:
                     pygame.draw.line(surface, (139, 54, 57),
                                      (cx - 8, mark_y + 6), (cx + 8, mark_y - 6), 2)
                 continue
+            # A dry graphite body sits strictly below the playable top. Its
+            # angular lower edge makes the support thickness readable without
+            # replacing notebook lines with smooth, soft platform boxes.
+            depth = min(15, max(4, self.thickness))
+            if style not in ("construction", "fold_edge", "ghost_line"):
+                rng = random.Random(self.seed * 17 + round(a))
+                body = [(sx1, y1+2), (sx2, y2+2)]
+                for px in range(sx2, sx1, -22):
+                    t = (px-sx1) / max(1, sx2-sx1)
+                    body.append((px, round(y1+(y2-y1)*t+depth+rng.randint(-2, 1))))
+                body.append((sx1, y1+depth))
+                pygame.draw.polygon(surface, (177, 173, 157), body)
+                pygame.draw.lines(surface, (115, 109, 96), False, body[2:], 1)
+                if not self.one_way:
+                    # Tall ink strokes are walls; trace their physical sides
+                    # as well so the silhouette does not promise a thin rail.
+                    for px, yy in ((sx1, y1), (sx2, y2)):
+                        jitter_line(surface, ink, (px, yy),
+                                    (px, yy+self.thickness), 2,
+                                    self.seed+px, 1, .65)
             if style == "ruler_line":
                 jitter_line(surface, (62, 66, 72), (sx1, y1), (sx2, y2),
                             3, self.seed, 1, .45)
@@ -216,7 +348,8 @@ class InkPlatform:
             while x < sx2 - 2:
                 t = (x - sx1) / max(1, sx2 - sx1)
                 y = y1 + (y2 - y1) * t
-                pygame.draw.line(surface, (74, 72, 69), (x, y + 3), (x + rng.randint(-2, 3), y + self.thickness - 2), 1)
+                pygame.draw.line(surface, (74, 72, 69), (x, y + 3),
+                                 (x + rng.randint(-4, 1), y + min(18, self.thickness) - 2), 1)
                 x += rng.randint(16, 29)
 
 
@@ -301,6 +434,16 @@ class PaperWorld:
             for rect in platform.collision_rects():
                 yield rect
 
+    def refresh_drawings(self, actors=()):
+        bodies = [actor.rect for actor in actors
+                  if actor is not None and not getattr(actor, "dead", False)
+                  and getattr(actor, "health", 1) > 0
+                  and getattr(actor, "draw_amount", 1) >= 1
+                  and getattr(actor, "layer", self.active_layer) == self.active_layer]
+        for platform in self.platforms:
+            if platform.layer == self.active_layer:
+                platform.refresh_lifecycle(bodies)
+
     def collision_entries(self):
         for platform in self.platforms:
             if platform.layer == self.active_layer:
@@ -315,7 +458,7 @@ class PaperWorld:
     def material_at(self, rect: pygame.Rect):
         return [z for z in self.zones if z.layer == self.active_layer and rect.colliderect(z.rect)]
 
-    def draw(self, surface, camera, renderer, time):
+    def draw(self, surface, camera, renderer, time, show_notes=True):
         if self.page == 1 and not self.zones:
             renderer.draw_coffee_stain(surface, camera, self.coffee_rect, time)
         for zone in self.zones:
@@ -326,7 +469,7 @@ class PaperWorld:
                 continue
             platform.draw(surface, camera)
             # A continuous dark top edge means physical support, on every page.
-            if platform.collidable and platform.one_way:
+            if platform.collider_active and platform.one_way:
                 for a, b in platform.visible_intervals():
                     if b < camera.x or a > camera.x + WIDTH:
                         continue
@@ -339,7 +482,7 @@ class PaperWorld:
             if -350 < sx < WIDTH + 100:
                 renderer.doodle_text(surface, text, (sx, y + camera.offset_y), INK_LIGHT,
                                      renderer.font_small, (-2, 1, -1, 2, 0)[i % 5])
-        for i, paper_note in enumerate(self.notes):
+        for i, paper_note in enumerate(self.notes if show_notes else ()):
             sx = camera.screen_x(paper_note.x)
             if -500 < sx < WIDTH + 120:
                 font = renderer.font if paper_note.size == "large" else renderer.font_small

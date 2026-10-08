@@ -53,7 +53,7 @@ class IdentityRebuildContracts(unittest.TestCase):
             selected += len(mandatory)
         self.assertEqual(selected, 25)
         self.assertEqual([build_chapter(page).end_x for page in range(3)],
-                         [10950.0, 13050.0, 16750.0])
+                         [23450.0, 20740.0, 29030.0])
 
     def test_shipping_route_contains_five_distinct_themed_bosses(self):
         found = {}
@@ -255,9 +255,9 @@ class IdentityRebuildContracts(unittest.TestCase):
             game._start_transition()
             game._update_transition(.70)
             self.assertTrue(game.transition_weapon_erased)
-            self.assertEqual(game.weapons.unlocked, {"pencil_blade"})
-            self.assertEqual(game.weapons.current_id, "pencil_blade")
-            self.assertEqual(game.save.data["weapons"], ["pencil_blade"])
+            self.assertEqual(game.weapons.unlocked, set())
+            self.assertEqual(game.weapons.current_id, "unarmed")
+            self.assertEqual(game.save.data["weapons"], [])
             self.assertEqual(game.behavior.snapshot()["counts"]["page_tools_erased"], 1)
         finally:
             directory.cleanup()
@@ -270,7 +270,8 @@ class IdentityRebuildContracts(unittest.TestCase):
             game.save.update_combat(snapshot["unlocked"], "marker_shotgun", snapshot["ammo"])
             game.level.load_chapter(2, "start", game.player, game.camera)
             game._apply_page_identity()
-            self.assertEqual(game.weapons.unlocked, {"pencil_blade"})
+            self.assertEqual(game.weapons.unlocked, set())
+            self.assertEqual(game.weapons.current_id, "unarmed")
             self.assertNotIn("marker_shotgun", game.weapons.active_loadout)
         finally:
             directory.cleanup()

@@ -33,13 +33,13 @@ def polish_route(runtime):
         runtime.world.notes[:] = [note for note in runtime.world.notes
                                   if note.text not in {'A / D MOVE     SPACE JUMP',
                                                        'F / J CUT     SHIFT / K DASH'}]
-        # Teach jump before the first step, combat before the first locked room.
-        for x,y,text in [(410,335,'A / D  move   |   SPACE  jump'),
-                         (610,380,'Release SPACE for a short hop.'),
-                         (1170,350,'F / J  three cuts   |   SHIFT / K  dash'),
-                         (1400,410,'Red warning: evade. Blue opening: strike.'),
-                         (3660,340,'S + SPACE  drop through a thin platform')]:
-            runtime.world.notes.append(PaperNote(x,y,text,'small',INK_LIGHT))
+        # A blank figure, three lines drawn ahead of it, then an actual tool.
+        # Bind the attack annotation to a target drawn after that tool is kept.
+        runtime.world.notes[:] = [note for note in runtime.world.notes
+            if note.text not in {'THREE HEARTS / fresh ink at every new fight',
+                                 'INK VILLAGE / keep the blade dry'}]
+        runtime.world.notes.append(PaperNote(1455,345,'a red stroke warns; a blue gap invites','small',INK_LIGHT))
+        runtime.world.notes.append(PaperNote(3640,438,'SHIFT / K  ->  leave the red line behind','small',INK_LIGHT))
         runtime.entities.add(PracticeDrawing())
 
 
@@ -49,38 +49,66 @@ class PracticeDrawing:
     mandatory = False
     layer = 0
     encounter_active = False
-    def __init__(self):
+    def __init__(self, x=1415, ground=545):
         from advanced_enemies import AdvancedEnemy
-        self.target = AdvancedEnemy(625)
+        self.x, self.ground = x, ground
+        self.target = AdvancedEnemy(x,ground)
         self.target.kind = 'practice_drawing'
         self.target.hp = self.target.max_hp = 2
         self.target.width, self.target.height = 48, 62
         self.enemies = [self.target]
         self.completed = False
+        self.reveal = 0.0
+        self.target.notebook_reveal = 0.0
+        self.hand = None
     def update(self, dt, ctx, interact=False):
-        self.encounter_active = (not self.completed and 350 < ctx.player.x < 760
-                                 and not ctx.player.locked)
+        from scripted_events import ArtistTool, artist_canvas_free
+        from action_content import claim_artist_canvas,release_artist_canvas
+        self.hand = None
+        if ctx.player.health<=0:
+            release_artist_canvas(ctx,self)
+            return
+        tool_ready = bool(getattr(ctx,'weapons',None) and ctx.weapons.unlocked)
+        if (not self.completed and self.reveal<1 and tool_ready and (self.reveal>0 or abs(ctx.player.center_x-self.x)<420)
+                and artist_canvas_free(ctx,self)):
+            if not claim_artist_canvas(ctx,self):return
+            if self.reveal == 0: ctx.sounds.play('pencil')
+            next_reveal = min(1,self.reveal+dt/.48)
+            occupied=self.target.rect.colliderect(ctx.player.rect.inflate(8,4))
+            self.reveal=.98 if next_reveal>=1 and occupied else next_reveal
+            self.target.notebook_reveal = self.reveal
+            if self.reveal < 1:
+                self.hand = ArtistTool('pencil',self.x,self.ground-62+62*self.reveal,True)
+                ctx.director.tool = self.hand
+            else:release_artist_canvas(ctx,self)
+        self.encounter_active = (not self.completed and self.reveal >= 1
+            and abs(ctx.player.center_x-self.x)<420 and not ctx.player.locked)
         self.target.vx = self.target.vy = 0
-        self.target.x, self.target.y = 625, 590
+        self.target.x, self.target.y = self.x, self.ground
         self.target.hit_flash = max(0, self.target.hit_flash-dt)
         self.target.invulnerable = max(0, self.target.invulnerable-dt)
         if self.target.dead and not self.completed:
             self.completed = True
+            release_artist_canvas(ctx,self)
             self.encounter_active = False
             self.enemies.clear()
             if ctx.game:
                 ctx.game.behavior.record('practice_complete')
-            ctx.level.toast = 'A good first line. Now try it on something that moves.'
+            ctx.level.toast = 'Out, then back. The fold remembers your hand.'
             ctx.level.toast_time = 3.5
     def draw(self, surface, camera, renderer):
-        if self.completed:
+        if self.completed or self.reveal <= 0:
             return
-        x = camera.screen_x(625)
-        pygame.draw.line(surface, INK_LIGHT, (x,555), (x,590), 3)
-        pygame.draw.circle(surface, (174,85,73), (x,550), 22, 3)
-        pygame.draw.circle(surface, INK, (x,550), 10, 2)
-        renderer.doodle_text(surface, 'F / J  try a cut', (x-74,504), INK_LIGHT,
-                             renderer.font_small, -1)
+        x,y = camera.screen_x(self.x),round(self.ground+camera.offset_y)
+        old=surface.get_clip()
+        surface.set_clip(old.clip(pygame.Rect(x-29,y-65,58,round(65*self.reveal))))
+        pygame.draw.line(surface, INK_LIGHT, (x,y-35), (x,y), 3)
+        pygame.draw.circle(surface, (174,85,73), (x,y-40), 22, 3)
+        pygame.draw.circle(surface, INK, (x,y-40), 10, 2)
+        surface.set_clip(old)
+        if self.reveal >= 1 and self.encounter_active:
+            renderer.doodle_text(surface,'F / J  send it, then watch it return',
+                (x-155,y-94),INK_LIGHT,renderer.font_small,-1)
 
 
 class ArtistCompanion:
@@ -152,6 +180,7 @@ class ArtistCompanion:
     @staticmethod
     def _active_fight(game):
         return any(getattr(entity, 'encounter_active', False)
+                   and not getattr(entity, 'completed', False)
                    for entity in game.level.entities.items)
 
     @staticmethod
@@ -277,6 +306,11 @@ class ArtistCompanion:
         # own this part of the sheet until the action settles.
         if self._active_fight(game):
             self.timer = 0
+            return
+        director=getattr(game.level,'director',None)
+        if (getattr(director,'canvas_owner',None) is not None
+                or getattr(getattr(director,'tool',None),'visible',False)
+                or getattr(director,'blocks_combat',False)):
             return
         if (game.level.toast_time > 0 or game.achievement_time > 0
                 or game.level.interaction_hint or self._other_artist_note(game)):

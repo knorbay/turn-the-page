@@ -73,7 +73,8 @@ class AchievementContracts(unittest.TestCase):
                          'paper_wasp','ink_clone','goblin_scribble','redaction_agent',
                          'moon_bot','star_scout','cactus_gunner','eraser_brute'):
                 game.behavior.record('enemy_defeated', kind=kind)
-            game.save.data['secrets'] = [str(i) for i in range(12)]
+            from sketches import SKETCHES
+            game.save.data['secrets'] = [s.secret_id for s in SKETCHES]
             game.achievements.evaluate(game)
             self.assertEqual(game.achievements.count, len(ACHIEVEMENTS))
             self.assertEqual(len(game.save.data["achievements"]), len(ACHIEVEMENTS))
@@ -92,7 +93,15 @@ class AchievementContracts(unittest.TestCase):
             game._update_achievements(1 / 60)
             game.draw()
             self.assertGreater(game.screen.get_bounding_rect().width, 0)
+            self.assertIsNone(game.achievement_banner)
+            self.assertTrue(game.achievements.pending)
+            game.state = "playing"
+            game.player.draw_amount = 1
+            game._update_achievements(1 / 60)
             self.assertIsNotNone(game.achievement_banner)
+            game._update_achievements(.5)
+            game.draw()
+            game.state = "achievements"
             game._key_down(pygame.K_ESCAPE)
             self.assertEqual(game.state, "title")
 
